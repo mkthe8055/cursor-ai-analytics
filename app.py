@@ -89,7 +89,7 @@ def get_user_stats(filtered_df):
     
     # Merge active days count with other stats
     unique_users = unique_users.merge(active_days, on='Email', how='left')
-    unique_users['Active Days'] = unique_users['Active Days'].fillna(0)
+    unique_users['Active Days'] = unique_users['Active Days'].fillna(0).astype(int)  # Convert to integer
     return unique_users
 
 def filter_dataframe(df, search_text, column='Email'):
