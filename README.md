@@ -1,46 +1,69 @@
-# Cursor AI Usage Analytics Dashboard
+# Cursor AI Metrics Analysis
 
-A Streamlit dashboard for analyzing Cursor AI usage metrics and user engagement patterns.
+A Streamlit application for analyzing Cursor AI usage metrics.
 
 ## Features
 
-- Upload and analyze Cursor AI metrics CSV files
-- View users who haven't used Cursor AI
-- Track most active users and their engagement
-- Filter data by date range
-- View summary statistics
+- Upload and analyze Cursor AI metrics data
+- View user activity and subscription request statistics
+- Filter and search through user data
+- Secure admin panel for data management
+- Manager and department information integration
+- Secure data storage in SQLite database
 
-## Installation
+## Setup
 
-1. Clone the repository:
-```bash
-git clone https://github.com/YOUR_USERNAME/cursor-ai-analytics
-cd cursor-ai-analytics
-```
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Create a `.env` file with the following variables:
+   ```
+   ADMIN_USERNAME=your_admin_username
+   ADMIN_PASSWORD=your_admin_password
+   ```
 
-2. Install requirements:
-```bash
-pip install -r requirements.txt
-```
+## Data Storage
 
-## Usage
+The application uses SQLite for all data storage. The database file `cursor_metrics.db` will be created automatically when you first run the application. It contains the following tables:
+- metrics_data: Stores user activity and subscription metrics
+- metadata: Stores information about data uploads
+- manager_data: Stores organizational hierarchy information (managers, directors, departments)
 
-1. Run the Streamlit app:
-```bash
-streamlit run app.py
-```
+## Running the Application
 
-2. Upload your Cursor AI metrics CSV file
-3. Use the date filter to analyze specific time periods
-4. View the analytics tables and metrics
+1. Start the main application:
+   ```bash
+   streamlit run app.py
+   ```
+
+2. Access the admin panel:
+   ```bash
+   streamlit run admin_app.py
+   ```
 
 ## Data Format
 
-The dashboard expects a CSV file with the following columns:
-- Date
+The application expects CSV files with the following columns:
+- Date (format: YYYY-MM-DDThh:mm:ss.sssZ)
 - Email
-- Is Active
-- Subscription Included Reqs
-- Other activity metrics
+- Is Active (boolean)
+- Subscription Included Reqs (numeric)
 
-Note: Sample CSV file is not included in the repository for privacy reasons.
+## Security
+
+- Admin authentication required for data management
+- All sensitive data stored securely in SQLite database
+- No sensitive data exposed in source code or configuration files
+- Database file should be properly secured with appropriate file permissions
+
+## Development
+
+The application is built with:
+- Python 3.8+
+- Streamlit
+- Pandas
+- SQLite3 (built into Python)
+- python-dotenv for configuration
+- bcrypt for password hashing
