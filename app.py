@@ -210,14 +210,10 @@ elif page == "Charts":
                     st.sidebar.error("End date must be after start date")
                     start_date, end_date = end_date, start_date
                 
-                # Convert start_date and end_date to datetime for comparison
-                start_datetime = pd.to_datetime(start_date)
-                end_datetime = pd.to_datetime(end_date)
-                
-                # Filter data by date range
+                # Filter data by date range using date() for comparison
                 df_filtered = df[
-                    (df['Date'] >= start_datetime) & 
-                    (df['Date'] <= end_datetime)
+                    (df['Date'].dt.date >= start_date) & 
+                    (df['Date'].dt.date <= end_date)
                 ].copy()
                 
                 # Display date range info
@@ -232,11 +228,6 @@ elif page == "Charts":
                 "Select Month",
                 available_months
             )
-            
-            # Get first and last day of selected month
-            selected_date = pd.to_datetime(selected_month, format='%B %Y')
-            start_date = selected_date.replace(day=1).date()
-            end_date = (selected_date + pd.offsets.MonthEnd(0)).date()
             
             # Filter data for selected month
             df_filtered = df[df['Month-Year'] == selected_month].copy()
@@ -480,7 +471,10 @@ elif page == "Charts":
                 
                 # Format date range for x-axis label
                 if inactive_date_option == "Selected Date Range":
-                    x_axis_label = f"{start_date:%b %d} - {end_date:%b %d, %Y}"
+                    if filter_type == "Month":
+                        x_axis_label = selected_month
+                    else:
+                        x_axis_label = f"{start_date:%b %d} - {end_date:%b %d, %Y}"
                 else:
                     x_axis_label = f"Until {today:%b %d, %Y}"
 
