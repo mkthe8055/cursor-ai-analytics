@@ -140,9 +140,8 @@ def load_data_from_db():
             
         # Convert to DataFrame
         df = pd.DataFrame(records)
-        # Convert date strings back to datetime
+        # Convert date strings back to datetime (keeping time information)
         df['Date'] = pd.to_datetime(df['date'])
-        df['Date'] = df['Date'].dt.date
         df['Email'] = df['email']
         df['Is Active'] = df['is_active'].astype(bool)
         df['Subscription Included Reqs'] = df['subscription_included_reqs']

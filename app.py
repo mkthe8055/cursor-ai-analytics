@@ -74,7 +74,8 @@ def validate_dataframe(df):
 def get_user_stats(filtered_df):
     """Get user statistics with manager information"""
     # First get active days count for each user
-    active_days = filtered_df.groupby('Email')['Is Active'].apply(lambda x: x.sum()).reset_index()
+    active_days = filtered_df.groupby(['Email', filtered_df['Date'].dt.date])['Is Active'].sum().reset_index()
+    active_days = active_days[active_days['Is Active'] > 0].groupby('Email').size().reset_index()
     active_days.columns = ['Email', 'Active Days']
     
     # Then get other stats
@@ -88,6 +89,7 @@ def get_user_stats(filtered_df):
     
     # Merge active days count with other stats
     unique_users = unique_users.merge(active_days, on='Email', how='left')
+    unique_users['Active Days'] = unique_users['Active Days'].fillna(0)
     return unique_users
 
 def filter_dataframe(df, search_text, column='Email'):
