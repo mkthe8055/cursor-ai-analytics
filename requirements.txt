@@ -4,3 +4,4 @@ python-dotenv==1.0.1
 bcrypt==4.1.2
 cryptography==42.0.5
 plotly
+altair==4.2.2
