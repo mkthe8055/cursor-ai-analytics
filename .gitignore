@@ -39,4 +39,3 @@ env/
 .DS_Store
 Thumbs.db
 *.csv
-cursor_metrics.db
