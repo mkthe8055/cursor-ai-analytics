@@ -732,6 +732,63 @@ elif page == "Charts":
             st.write("")
             st.markdown("---")
 
+            # Active Users Analysis Section
+            st.header("📈 Active Users Analysis")
+            
+            # Calculate active users trend
+            active_by_date = df_filtered.groupby(df_filtered['Date'].dt.date).apply(
+                lambda x: len(get_user_stats(x)[get_user_stats(x)['Active Days'] > 0])
+            ).reset_index()
+            active_by_date.columns = ['Date', 'Count']
+            
+            # Create trend chart
+            active_trend_fig = go.Figure()
+            
+            # Add line trace for trend
+            active_trend_fig.add_trace(go.Scatter(
+                x=active_by_date['Date'],
+                y=active_by_date['Count'],
+                mode='lines+markers',  # Show both line and points
+                line=dict(
+                    color='#2ecc71',  # Green color for consistency
+                    width=2
+                ),
+                marker=dict(
+                    size=6,
+                    color='#2ecc71',
+                ),
+                name='Active Users'
+            ))
+
+            # Update layout
+            active_trend_fig.update_layout(
+                title=f"Daily Active Users Trend - {date_display}",
+                xaxis_title="Date",
+                yaxis_title="Number of Active Users",
+                showlegend=False,
+                hovermode='x unified'  # Show hover for all points at same x-value
+            )
+            
+            # Show the trend plot
+            st.plotly_chart(active_trend_fig, use_container_width=True)
+            
+            # Add expandable section for active users list
+            st.subheader("Detailed Active Users List")
+            with st.expander("View All Active Users", expanded=False):
+                if not active_users.empty:
+                    search_active_detail = st.text_input("Search active users", key="search_active_detail")
+                    filtered_active_detail = filter_dataframe_search(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_active_detail)
+                    if filtered_active_detail.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_active_detail.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
+                else:
+                    st.info("No active users found in this period")
+            
+            # Add spacing before next section
+            st.write("")
+            st.markdown("---")
+
             # Separate Inactive Users Analysis Section
             st.header("📉 Inactive Users Analysis")
             st.markdown(f"*{date_display}*")  # Add date info
@@ -770,20 +827,6 @@ elif page == "Charts":
                 hovermode='x unified'  # Show hover for all points at same x-value
             )
             
-            # Comment out hover text
-            # Get top 10 inactive users for hover info
-            # top_10_inactive = inactive_users.sort_values(by='Email').head(10)['Email'].tolist()
-            # hover_text = "<br>".join(f"{i+1}. {email}" for i, email in enumerate(top_10_inactive))
-            
-            # Comment out hover template
-            # trend_fig.update_traces(
-            #     hovertemplate=(
-            #         "<b>Inactive Users: %{y}</b><br><br>"
-            #         + hover_text
-            #         + ("<br><br>...and more" if len(inactive_users) > 10 else "")
-            #     )
-            # )
-            
             # Show the trend plot
             st.plotly_chart(trend_fig, use_container_width=True)
             
@@ -799,77 +842,6 @@ elif page == "Charts":
                         st.dataframe(filtered_inactive_detail.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
                 else:
                     st.info("No inactive users found in this period")
-            
-            # Add spacing before next section
-            st.write("")
-            st.markdown("---")
-
-            # Active Users Analysis Section
-            st.header("📈 Active Users Analysis")
-            
-            # Calculate active users trend
-            active_by_date = df_filtered.groupby(df_filtered['Date'].dt.date).apply(
-                lambda x: len(get_user_stats(x)[get_user_stats(x)['Active Days'] > 0])
-            ).reset_index()
-            active_by_date.columns = ['Date', 'Count']
-            
-            # Create trend chart
-            active_trend_fig = go.Figure()
-            
-            # Add line trace for trend
-            active_trend_fig.add_trace(go.Scatter(
-                x=active_by_date['Date'],
-                y=active_by_date['Count'],
-                mode='lines+markers',  # Show both line and points
-                line=dict(
-                    color='#2ecc71',  # Green color for consistency
-                    width=2
-                ),
-                marker=dict(
-                    size=6,
-                    color='#2ecc71',
-                ),
-                name='Active Users'
-            ))
-
-            # Update layout
-            active_trend_fig.update_layout(
-                title=f"Daily Active Users Trend - {date_display}",
-                xaxis_title="Date",
-                yaxis_title="Number of Active Users",
-                showlegend=False,
-                hovermode='x unified'  # Show hover for all points at same x-value
-            )
-            
-            # Comment out hover text
-            # Get top 10 active users for hover info
-            # top_10_active = active_users.sort_values(by=['Active Days', 'Email'], ascending=[False, True]).head(10)['Email'].tolist()
-            # active_hover_text = "<br>".join(f"{i+1}. {email}" for i, email in enumerate(top_10_active))
-            
-            # Comment out hover template
-            # active_trend_fig.update_traces(
-            #     hovertemplate=(
-            #         "<b>Active Users: %{y}</b><br><br>"
-            #         + active_hover_text
-            #         + ("<br><br>...and more" if len(active_users) > 10 else "")
-            #     )
-            # )
-            
-            # Show the trend plot
-            st.plotly_chart(active_trend_fig, use_container_width=True)
-            
-            # Add expandable section for active users list
-            st.subheader("Detailed Active Users List")
-            with st.expander("View All Active Users", expanded=False):
-                if not active_users.empty:
-                    search_active_detail = st.text_input("Search active users", key="search_active_detail")
-                    filtered_active_detail = filter_dataframe_search(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_active_detail)
-                    if filtered_active_detail.empty:
-                        st.info("No matching users found")
-                    else:
-                        st.dataframe(filtered_active_detail.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
-                else:
-                    st.info("No active users found in this period")
             
             # Add spacing before next section
             st.write("")
