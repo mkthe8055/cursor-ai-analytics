@@ -74,13 +74,13 @@ def validate_dataframe(df):
 def get_user_stats(filtered_df):
     """Get user statistics with manager information"""
     # First get active days count for each user
-    active_days = filtered_df.groupby(['Email', filtered_df['Date'].dt.date])['Is Active'].sum().reset_index()
+    active_days = filtered_df.groupby(['Email', filtered_df['Date'].dt.date])['Is Active'].max().reset_index()
     active_days = active_days[active_days['Is Active'] > 0].groupby('Email').size().reset_index()
     active_days.columns = ['Email', 'Active Days']
     
     # Then get other stats
     unique_users = filtered_df.groupby('Email').agg({
-        'Is Active': 'any',  # True if user was active on any day
+        'Is Active': 'max',  # True if user was active on any day
         'Subscription Included Reqs': 'sum',  # Total subscription requests
         'Manager': 'first',  # Take first manager value
         'Director': 'first',  # Take first director value
@@ -194,35 +194,62 @@ elif page == "Charts":
         end_date = None
         selected_month = None
         
-        # Sidebar filters
-        st.sidebar.subheader("Time Range Selection")
-        filter_type = st.sidebar.radio("Select Filter Type", ["Date Range", "Month"])
+        # Date range selection in sidebar
+        filter_type = st.sidebar.radio(
+            "Select Date Range Type",
+            ["Date Range", "Month", "Until Today"]
+        )
         
         if filter_type == "Date Range":
-            # Date range filter
-            min_date = df['Date'].min().date()
-            max_date = df['Date'].max().date()
-            start_date = st.sidebar.date_input("Start Date", value=min_date)
-            end_date = st.sidebar.date_input("End Date", value=max_date)
+            # Get min and max dates from data
+            min_date = df['Date'].dt.date.min()
+            max_date = df['Date'].dt.date.max()
             
-            if isinstance(start_date, date) and isinstance(end_date, date):
-                if start_date > end_date:
-                    st.sidebar.error("End date must be after start date")
-                    start_date, end_date = end_date, start_date
-                
-                # Filter data by date range using date() for comparison
-                df_filtered = df[
-                    (df['Date'].dt.date >= start_date) & 
-                    (df['Date'].dt.date <= end_date)
-                ].copy()
-                
-                # Display date range info
-                st.caption(f"📅 Showing data for: {start_date:%B %d, %Y} to {end_date:%B %d, %Y}")
-        else:  # Month selection
+            # Create date inputs with min/max restrictions
+            start_date = st.sidebar.date_input(
+                "Start Date",
+                value=min_date,
+                min_value=min_date,
+                max_value=max_date
+            )
+            end_date = st.sidebar.date_input(
+                "End Date",
+                value=max_date,
+                min_value=min_date,
+                max_value=max_date
+            )
+            
+            # Validate date range
+            if start_date > end_date:
+                st.sidebar.error("End date must be after start date")
+                start_date, end_date = end_date, start_date
+            
+            # Add warning if dates are outside available range
+            if start_date < min_date or end_date > max_date:
+                st.sidebar.warning(f"Please select dates between {min_date:%B %d, %Y} and {max_date:%B %d, %Y}")
+                start_date = max(start_date, min_date)
+                end_date = min(end_date, max_date)
+            
+            # Filter data for selected date range
+            df_filtered = df[
+                (df['Date'].dt.date >= start_date) & 
+                (df['Date'].dt.date <= end_date)
+            ].copy()
+            
+            # Display selected date range info
+            st.caption(f"📅 Showing data for: {start_date:%B %d, %Y} to {end_date:%B %d, %Y}")
+            
+        elif filter_type == "Month":  # Month selection
+            # Create Month-Year column with the correct date
+            month_year_dates = pd.to_datetime(df['Date'])
+            df['Month-Year'] = month_year_dates.dt.strftime('%B %Y')
+            
             # Get unique months in reverse chronological order
-            available_months = sorted(df['Month-Year'].unique(), 
-                                   key=lambda x: pd.to_datetime(x, format='%B %Y'), 
-                                   reverse=True)
+            available_months = sorted(
+                df['Month-Year'].unique(),
+                key=lambda x: pd.to_datetime(x + " 1", format='%B %Y %d'),  # Add day for proper parsing
+                reverse=True
+            )
             
             selected_month = st.sidebar.selectbox(
                 "Select Month",
@@ -230,11 +257,41 @@ elif page == "Charts":
             )
             
             # Filter data for selected month
-            df_filtered = df[df['Month-Year'] == selected_month].copy()
+            month_start = pd.to_datetime(selected_month + " 1", format='%B %Y %d')
+            month_end = month_start + pd.offsets.MonthEnd(0)
+            
+            # Filter using the full datetime to ensure correct month and year
+            df_filtered = df[
+                (df['Date'].dt.to_period('M') == month_start.to_period('M'))
+            ].copy()
             
             # Display selected month info
             st.caption(f"📅 Showing data for: {selected_month}")
-        
+            
+        else:  # Until Today
+            # Calculate the earliest date from the data
+            earliest_date = df['Date'].dt.date.min()
+            today = datetime.now().date()
+            
+            # Ensure today is not beyond the max date in the data
+            max_date = df['Date'].dt.date.max()
+            if today > max_date:
+                today = max_date
+                st.sidebar.info(f"Showing data until the latest available date: {max_date:%B %d, %Y}")
+            
+            # Filter data from earliest date until today
+            df_filtered = df[
+                (df['Date'].dt.date >= earliest_date) & 
+                (df['Date'].dt.date <= today)
+            ].copy()
+            
+            # Display date range info
+            st.caption(f"📅 Showing data from {earliest_date:%B %d, %Y} until {today:%B %d, %Y}")
+            
+            # Set start_date and end_date for later use
+            start_date = earliest_date
+            end_date = today
+            
         # Get user statistics
         user_stats = get_user_stats(df_filtered)
         
@@ -247,8 +304,10 @@ elif page == "Charts":
                     return "75% (15-19 days)"
                 elif active_days >= 10:
                     return "50% (10-14 days)"
+                elif active_days >= 5:
+                    return "25% (5-9 days)"
                 else:
-                    return "< 50% (< 10 days)"
+                    return "< 25% (< 5 days)"
             
             # Add usage percentage column
             user_stats['Usage Level'] = user_stats['Active Days'].apply(get_usage_percentage)
@@ -257,7 +316,13 @@ elif page == "Charts":
             usage_distribution = user_stats['Usage Level'].value_counts()
             
             # Sort the index in descending order of usage percentage
-            usage_levels = ['100% (20+ days)', '75% (15-19 days)', '50% (10-14 days)', '< 50% (< 10 days)']
+            usage_levels = [
+                '100% (20+ days)', 
+                '75% (15-19 days)', 
+                '50% (10-14 days)', 
+                '25% (5-9 days)',
+                '< 25% (< 5 days)'
+            ]
             usage_distribution = usage_distribution.reindex(usage_levels).fillna(0)
             
             # Create color map for usage levels
@@ -265,7 +330,8 @@ elif page == "Charts":
                 '100% (20+ days)': '#2ecc71',  # Green
                 '75% (15-19 days)': '#3498db',  # Blue
                 '50% (10-14 days)': '#f1c40f',  # Yellow
-                '< 50% (< 10 days)': '#e74c3c'  # Red
+                '25% (5-9 days)': '#e67e22',    # Orange
+                '< 25% (< 5 days)': '#e74c3c'   # Red
             }
             
             # Create tabs for different chart types
@@ -376,10 +442,90 @@ elif page == "Charts":
                 • **100% Usage** (20+ days active)
                 • **75% Usage** (15-19 days active)
                 • **50% Usage** (10-14 days active)
-                • **< 50% Usage** (< 10 days active)
+                • **25% Usage** (5-9 days active)
+                • **< 25% Usage** (< 5 days active)
                 
                 *Hover over the chart for detailed user information*
                 """)
+            
+            # Add expandable sections for each usage category
+            st.subheader("Detailed User Lists by Category")
+            
+            def filter_dataframe(df, search_text):
+                """Filter dataframe based on search text across all columns"""
+                if search_text:
+                    mask = df.astype(str).apply(lambda x: x.str.contains(search_text, case=False)).any(axis=1)
+                    return df[mask]
+                return df
+            
+            # 100% Usage Users
+            with st.expander("100% Usage (20+ days active)", expanded=False):
+                users_100 = user_stats[user_stats['Active Days'] >= 20]
+                if not users_100.empty:
+                    search_100 = st.text_input("Search in 100% Usage category", key="search_100")
+                    filtered_100 = filter_dataframe(users_100[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_100)
+                    if filtered_100.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_100.sort_values('Active Days', ascending=False), width=1200)
+                else:
+                    st.info("No users in this category")
+            
+            # 75% Usage Users
+            with st.expander("75% Usage (15-19 days active)", expanded=False):
+                users_75 = user_stats[(user_stats['Active Days'] >= 15) & (user_stats['Active Days'] < 20)]
+                if not users_75.empty:
+                    search_75 = st.text_input("Search in 75% Usage category", key="search_75")
+                    filtered_75 = filter_dataframe(users_75[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_75)
+                    if filtered_75.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_75.sort_values('Active Days', ascending=False), width=1200)
+                else:
+                    st.info("No users in this category")
+            
+            # 50% Usage Users
+            with st.expander("50% Usage (10-14 days active)", expanded=False):
+                users_50 = user_stats[(user_stats['Active Days'] >= 10) & (user_stats['Active Days'] < 15)]
+                if not users_50.empty:
+                    search_50 = st.text_input("Search in 50% Usage category", key="search_50")
+                    filtered_50 = filter_dataframe(users_50[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_50)
+                    if filtered_50.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_50.sort_values('Active Days', ascending=False), width=1200)
+                else:
+                    st.info("No users in this category")
+            
+            # 25% Usage Users
+            with st.expander("25% Usage (5-9 days active)", expanded=False):
+                users_25 = user_stats[(user_stats['Active Days'] >= 5) & (user_stats['Active Days'] < 10)]
+                if not users_25.empty:
+                    search_25 = st.text_input("Search in 25% Usage category", key="search_25")
+                    filtered_25 = filter_dataframe(users_25[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_25)
+                    if filtered_25.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_25.sort_values('Active Days', ascending=False), width=1200)
+                else:
+                    st.info("No users in this category")
+            
+            # < 25% Usage Users
+            with st.expander("< 25% Usage (< 5 days active)", expanded=False):
+                users_less_25 = user_stats[user_stats['Active Days'] < 5]
+                if not users_less_25.empty:
+                    search_less_25 = st.text_input("Search in < 25% Usage category", key="search_less_25")
+                    filtered_less_25 = filter_dataframe(users_less_25[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_less_25)
+                    if filtered_less_25.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_less_25.sort_values('Active Days', ascending=False), width=1200)
+                else:
+                    st.info("No users in this category")
+            
+            # Add spacing before next section
+            st.write("")
+            st.markdown("---")
             
             # Display summary statistics
             st.subheader("Activity Level Summary")
@@ -389,145 +535,326 @@ elif page == "Charts":
             
             # Display total users in a prominent way
             st.markdown(f"**👥 Total Users: {total_users}**")
+            
+            # Calculate dormant users if not already calculated
+            if 'dormant_users' not in locals():
+                dormant_users = df[~df['Email'].isin(user_stats['Email'])]['Email'].unique()
+                total_dormant = len(dormant_users)
+            
+            # Calculate percentages for each category including dormant users
+            highly_active = len(user_stats[user_stats['Active Days'] >= 20])
+            regular_users = len(user_stats[(user_stats['Active Days'] >= 15) & (user_stats['Active Days'] < 20)])
+            moderate_users = len(user_stats[(user_stats['Active Days'] >= 10) & (user_stats['Active Days'] < 15)])
+            light_users = len(user_stats[(user_stats['Active Days'] >= 5) & (user_stats['Active Days'] < 10)])
+            minimal_users = len(user_stats[user_stats['Active Days'] < 5])
+            
+            # Create columns for the metrics
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                st.metric(
+                    "100% Usage",
+                    f"{highly_active} users",
+                    f"{(highly_active/total_users*100):.1f}%",
+                    help="Users active for 20+ days"
+                )
+            
+            with col2:
+                st.metric(
+                    "75% Usage",
+                    f"{regular_users} users",
+                    f"{(regular_users/total_users*100):.1f}%",
+                    help="Users active for 15-19 days"
+                )
+            
+            with col3:
+                st.metric(
+                    "50% Usage",
+                    f"{moderate_users} users",
+                    f"{(moderate_users/total_users*100):.1f}%",
+                    help="Users active for 10-14 days"
+                )
+            
+            with col4:
+                st.metric(
+                    "25% Usage",
+                    f"{light_users} users",
+                    f"{(light_users/total_users*100):.1f}%",
+                    help="Users active for 5-9 days"
+                )
+            
+            with col5:
+                st.metric(
+                    "< 25% Usage",
+                    f"{minimal_users} users",
+                    f"{(minimal_users/total_users*100):.1f}%",
+                    help="Users active for less than 5 days"
+                )
+            
+            # Commenting out dormant users metric
+            # with col6:
+            #     st.metric(
+            #         "Dormant",
+            #         f"{total_dormant} users",
+            #         f"{(total_dormant/total_users*100):.1f}%",
+            #         help="Previously active users, not seen in current period"
+            #     )
+            
+            # Add spacing and section divider
+            st.write("")
             st.markdown("---")
             
-            # Display usage level statistics
-            stats_cols = st.columns(4)
-            with stats_cols[0]:
-                active_users = len(user_stats[user_stats['Active Days'] >= 20])
-                percentage = (active_users / total_users * 100) if total_users > 0 else 0
-                st.metric("100% Usage", 
-                         f"{active_users} ({percentage:.1f}%)",
-                         help="Users active for 20+ days per month")
-            with stats_cols[1]:
-                regular_users = len(user_stats[(user_stats['Active Days'] >= 15) & (user_stats['Active Days'] < 20)])
-                percentage = (regular_users / total_users * 100) if total_users > 0 else 0
-                st.metric("75% Usage", 
-                         f"{regular_users} ({percentage:.1f}%)",
-                         help="Users active for 15-19 days per month")
-            with stats_cols[2]:
-                moderate_users = len(user_stats[(user_stats['Active Days'] >= 10) & (user_stats['Active Days'] < 15)])
-                percentage = (moderate_users / total_users * 100) if total_users > 0 else 0
-                st.metric("50% Usage", 
-                         f"{moderate_users} ({percentage:.1f}%)",
-                         help="Users active for 10-14 days per month")
-            with stats_cols[3]:
-                occasional_users = len(user_stats[user_stats['Active Days'] < 10])
-                percentage = (occasional_users / total_users * 100) if total_users > 0 else 0
-                st.metric("< 50% Usage", 
-                         f"{occasional_users} ({percentage:.1f}%)",
-                         help="Users active for less than 10 days per month")
-
-            # Inactive Users Analysis
-            st.markdown("---")
-            st.subheader("📉 Inactive Users Analysis")
+            # User Activity Analysis Section
+            st.subheader("📊 Active, Inactive & Dormant Users Analysis")
             
-            # Calculate the earliest date from the data
-            earliest_date = df['Date'].min().date()
-            today = datetime.now().date()
-
-            # Date range selection
-            inactive_date_option = st.radio(
-                "Select Date Range",
-                ["Selected Date Range", "Until Today"],
-                key="inactive_date_option"
-            )
-
-            # Get the filtered dataframe based on date range
-            if inactive_date_option == "Selected Date Range":
-                # Use the filtered dataframe from sidebar date range
-                df_inactive_period = df_filtered.copy()
-                if filter_type == "Month":
-                    date_display = f"Showing data for: {selected_month}"
-                else:
-                    date_display = f"Showing data for: {start_date:%B %d, %Y} to {end_date:%B %d, %Y}"
-            else:  # Until Today
-                df_inactive_period = df[
-                    (df['Date'].dt.date >= earliest_date) & 
-                    (df['Date'].dt.date <= today)
-                ]
-                date_display = f"Showing data from {earliest_date:%B %d, %Y} until today ({today:%B %d, %Y})"
+            # Get date display based on filter type
+            if filter_type == "Month":
+                date_display = f"📅 Showing data for: {selected_month}"
+            elif filter_type == "Until Today":
+                date_display = f"📅 Showing data from {earliest_date:%B %d, %Y} until {today:%B %d, %Y}"
+            else:  # Date Range
+                date_display = f"📅 Showing data for: {start_date:%B %d, %Y} to {end_date:%B %d, %Y}"
             
             st.markdown(f"*{date_display}*")
             
-            # Calculate inactive users
-            inactive_user_stats = get_user_stats(df_inactive_period)
-            inactive_users = inactive_user_stats[inactive_user_stats['Active Days'] == 0]
+            # Calculate user categories
+            period_user_stats = get_user_stats(df_filtered)
+            active_users = period_user_stats[period_user_stats['Subscription Included Reqs'] > 0]
+            # Dormant users are those who were active (opened the app) but made no subscription requests
+            dormant_users = period_user_stats[
+                (period_user_stats['Is Active'] > 0) & 
+                (period_user_stats['Subscription Included Reqs'] == 0)
+            ]
+            # Inactive users are those who didn't open the app at all
+            inactive_users = period_user_stats[period_user_stats['Is Active'] == 0]
+            
+            total_active = len(active_users)
             total_inactive = len(inactive_users)
+            total_dormant = len(dormant_users)
+            period_total = total_active + total_inactive + total_dormant
+            
+            # Display summary
+            st.markdown(f"""
+            👥 **User Activity Summary:**
+            
+            • **Active Users:** {total_active} ({(total_active/period_total*100):.1f}%) - _Users who logged in and performed actions during the selected period_
+            • **Inactive Users:** {total_inactive} ({(total_inactive/period_total*100):.1f}%) - _No activity in this period_
+            • **Dormant Users:** {total_dormant} ({(total_dormant/period_total*100):.1f}%) - _Used the app but not made any AI Requests_
+            """)
+            
+            # Create figure for user status comparison
+            fig = go.Figure()
+            
+            # Add bar traces
+            fig.add_trace(go.Bar(
+                x=['Active Users', 'Inactive Users', 'Dormant Users'],
+                y=[total_active, total_inactive, total_dormant],
+                marker_color=['#2ecc71', '#e74c3c', '#f39c12'],  # Green for active, Red for inactive, Orange for dormant
+                text=[total_active, total_inactive, total_dormant],
+                textposition='auto',
+            ))
 
-            if total_inactive > 0:
-                # Display summary
-                total_users = len(inactive_user_stats)
-                st.markdown(f"""
-                👥 **Total Users: {total_users}**
-                
-                🚫 **Total Inactive Users: {total_inactive}** ({(total_inactive/total_users*100):.1f}% of total users)
-                
-                Inactive users are those who have 0 active days during the selected time period.
-                """)
-                
-                # Create bar chart for inactive distribution
-                fig = go.Figure()
-                
-                # Format date range for x-axis label
-                if inactive_date_option == "Selected Date Range":
-                    if filter_type == "Month":
-                        x_axis_label = selected_month
+            # Update layout
+            fig.update_layout(
+                title=f"User Status Distribution - {date_display}",
+                yaxis_title="Number of Users",
+                showlegend=False
+            )
+            
+            # Show the plot
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add expandable sections for user lists
+            st.subheader("Detailed User Lists")
+            
+            # Active Users List
+            with st.expander("View Active Users", expanded=False):
+                if not active_users.empty:
+                    search_active = st.text_input("Search active users", key="search_active")
+                    filtered_active = filter_dataframe(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_active)
+                    if filtered_active.empty:
+                        st.info("No matching users found")
                     else:
-                        x_axis_label = f"{start_date:%b %d} - {end_date:%b %d, %Y}"
+                        st.dataframe(filtered_active.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
                 else:
-                    x_axis_label = f"Until {today:%b %d, %Y}"
-
-                # Get top 10 inactive users
-                top_10_inactive = inactive_users.sort_values(by='Email').head(10)['Email'].tolist()
-                hover_text = "<br>".join(f"{i+1}. {email}" for i, email in enumerate(top_10_inactive))
+                    st.info("No active users found")
+            
+            # Inactive Users List
+            with st.expander("View Inactive Users", expanded=False):
+                if not inactive_users.empty:
+                    search_inactive = st.text_input("Search inactive users", key="search_inactive")
+                    filtered_inactive = filter_dataframe(inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_inactive)
+                    if filtered_inactive.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_inactive.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
+                else:
+                    st.info("No inactive users found")
+            
+            # Dormant Users List
+            with st.expander("View Dormant Users", expanded=False):
+                # Get dormant users - those who were active but made no subscription requests
+                dormant_df = period_user_stats[
+                    (period_user_stats['Active Days'] > 0) & 
+                    (period_user_stats['Subscription Included Reqs'] == 0)
+                ]
                 
-                fig.add_trace(go.Bar(
-                    name="Inactive Users",
-                    x=[x_axis_label],
-                    y=[total_inactive],
-                    text=f"{total_inactive}",
-                    textposition='auto',
-                    marker_color='#e74c3c',
-                    width=0.5,
-                    hoverlabel=dict(
-                        bgcolor='#2c3e50',  # Dark blue-grey background
-                        font_size=14,
-                        font_family="Arial"
-                    ),
-                    hovertemplate=(
-                        "<b>Total Inactive Users: %{y}</b><br><br>"
-                        "<b>Top 10 Inactive Users:</b><br>"
-                        + hover_text
-                        + ("<br><br>...and more" if len(inactive_users) > 10 else "")
-                        + "<extra></extra>"
-                    )
-                ))
+                if not dormant_df.empty:
+                    search_dormant = st.text_input("Search dormant users", key="search_dormant")
+                    filtered_dormant = filter_dataframe(dormant_df[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_dormant)
+                    if filtered_dormant.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_dormant.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
+                else:
+                    st.info("No dormant users found")
+            
+            # Add spacing before next section
+            st.write("")
+            st.markdown("---")
 
-                # Update layout
-                fig.update_layout(
-                    title={
-                        'text': 'Distribution of Inactive Users',
-                        'y': 0.95,
-                        'x': 0.5,
-                        'xanchor': 'center',
-                        'yanchor': 'top'
-                    },
-                    xaxis_title="Time Range",
-                    yaxis_title="Number of Inactive Users",
-                    showlegend=False,
-                    height=400,
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    bargap=0.3,
-                    xaxis=dict(
-                        tickangle=0,
-                        tickfont=dict(size=12)
-                    )
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.success("🎉 Great news! There are no inactive users (0 active days) in the selected time period.")
+            # Separate Inactive Users Analysis Section
+            st.header("📉 Inactive Users Analysis")
+            st.markdown(f"*{date_display}*")  # Add date info
+            
+            # Calculate inactive users trend
+            inactive_by_date = df_filtered.groupby(df_filtered['Date'].dt.date).apply(
+                lambda x: len(get_user_stats(x)[get_user_stats(x)['Active Days'] == 0])
+            ).reset_index()
+            inactive_by_date.columns = ['Date', 'Count']
+            
+            # Create trend chart
+            trend_fig = go.Figure()
+            
+            # Add line trace for trend
+            trend_fig.add_trace(go.Scatter(
+                x=inactive_by_date['Date'],
+                y=inactive_by_date['Count'],
+                mode='lines+markers',  # Show both line and points
+                line=dict(
+                    color='#e74c3c',  # Red color for consistency
+                    width=2
+                ),
+                marker=dict(
+                    size=6,
+                    color='#e74c3c',
+                ),
+                name='Inactive Users'
+            ))
+
+            # Update layout
+            trend_fig.update_layout(
+                title=f"Daily Inactive Users Trend - {date_display}",
+                xaxis_title="Date",
+                yaxis_title="Number of Inactive Users",
+                showlegend=False,
+                hovermode='x unified'  # Show hover for all points at same x-value
+            )
+            
+            # Comment out hover text
+            # Get top 10 inactive users for hover info
+            # top_10_inactive = inactive_users.sort_values(by='Email').head(10)['Email'].tolist()
+            # hover_text = "<br>".join(f"{i+1}. {email}" for i, email in enumerate(top_10_inactive))
+            
+            # Comment out hover template
+            # trend_fig.update_traces(
+            #     hovertemplate=(
+            #         "<b>Inactive Users: %{y}</b><br><br>"
+            #         + hover_text
+            #         + ("<br><br>...and more" if len(inactive_users) > 10 else "")
+            #     )
+            # )
+            
+            # Show the trend plot
+            st.plotly_chart(trend_fig, use_container_width=True)
+            
+            # Add expandable section for inactive users list
+            st.subheader("Detailed Inactive Users List")
+            with st.expander("View All Inactive Users", expanded=False):
+                if not inactive_users.empty:
+                    search_inactive_detail = st.text_input("Search inactive users", key="search_inactive_detail")
+                    filtered_inactive_detail = filter_dataframe(inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_inactive_detail)
+                    if filtered_inactive_detail.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_inactive_detail.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
+                else:
+                    st.info("No inactive users found in this period")
+            
+            # Add spacing before next section
+            st.write("")
+            st.markdown("---")
+
+            # Active Users Analysis Section
+            st.header("📈 Active Users Analysis")
+            
+            # Calculate active users trend
+            active_by_date = df_filtered.groupby(df_filtered['Date'].dt.date).apply(
+                lambda x: len(get_user_stats(x)[get_user_stats(x)['Active Days'] > 0])
+            ).reset_index()
+            active_by_date.columns = ['Date', 'Count']
+            
+            # Create trend chart
+            active_trend_fig = go.Figure()
+            
+            # Add line trace for trend
+            active_trend_fig.add_trace(go.Scatter(
+                x=active_by_date['Date'],
+                y=active_by_date['Count'],
+                mode='lines+markers',  # Show both line and points
+                line=dict(
+                    color='#2ecc71',  # Green color for consistency
+                    width=2
+                ),
+                marker=dict(
+                    size=6,
+                    color='#2ecc71',
+                ),
+                name='Active Users'
+            ))
+
+            # Update layout
+            active_trend_fig.update_layout(
+                title=f"Daily Active Users Trend - {date_display}",
+                xaxis_title="Date",
+                yaxis_title="Number of Active Users",
+                showlegend=False,
+                hovermode='x unified'  # Show hover for all points at same x-value
+            )
+            
+            # Comment out hover text
+            # Get top 10 active users for hover info
+            # top_10_active = active_users.sort_values(by=['Active Days', 'Email'], ascending=[False, True]).head(10)['Email'].tolist()
+            # active_hover_text = "<br>".join(f"{i+1}. {email}" for i, email in enumerate(top_10_active))
+            
+            # Comment out hover template
+            # active_trend_fig.update_traces(
+            #     hovertemplate=(
+            #         "<b>Active Users: %{y}</b><br><br>"
+            #         + active_hover_text
+            #         + ("<br><br>...and more" if len(active_users) > 10 else "")
+            #     )
+            # )
+            
+            # Show the trend plot
+            st.plotly_chart(active_trend_fig, use_container_width=True)
+            
+            # Add expandable section for active users list
+            st.subheader("Detailed Active Users List")
+            with st.expander("View All Active Users", expanded=False):
+                if not active_users.empty:
+                    search_active_detail = st.text_input("Search active users", key="search_active_detail")
+                    filtered_active_detail = filter_dataframe(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_active_detail)
+                    if filtered_active_detail.empty:
+                        st.info("No matching users found")
+                    else:
+                        st.dataframe(filtered_active_detail.sort_values(['Active Days', 'Email'], ascending=[False, True]), width=1200)
+                else:
+                    st.info("No active users found in this period")
+            
+            # Add spacing before next section
+            st.write("")
+            st.markdown("---")
 
         else:
             st.error("Error processing user statistics")
@@ -557,15 +884,31 @@ else:  # Dashboard page
         min_date = df['Date'].dt.date.min()
         max_date = df['Date'].dt.date.max()
         
-        # Create date inputs with proper date objects
-        start_date = st.sidebar.date_input("Start Date", value=min_date)
-        end_date = st.sidebar.date_input("End Date", value=max_date)
+        # Create date inputs with proper date objects and min/max restrictions
+        start_date = st.sidebar.date_input(
+            "Start Date",
+            value=min_date,
+            min_value=min_date,
+            max_value=max_date
+        )
+        end_date = st.sidebar.date_input(
+            "End Date",
+            value=max_date,
+            min_value=min_date,
+            max_value=max_date
+        )
         
         # Validate date range
         if isinstance(start_date, date) and isinstance(end_date, date):
             if start_date > end_date:
                 st.sidebar.error("End date must be after start date")
                 start_date, end_date = end_date, start_date
+            
+            # Add warning if dates are outside available range
+            if start_date < min_date or end_date > max_date:
+                st.sidebar.warning(f"Please select dates between {min_date:%B %d, %Y} and {max_date:%B %d, %Y}")
+                start_date = max(start_date, min_date)
+                end_date = min(end_date, max_date)
         
         # Filter data by date range using datetime.date objects
         mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
