@@ -33,12 +33,19 @@ def authenticate_user(username, password):
     return (username == os.getenv('ADMIN_USERNAME') and 
             password == os.getenv('ADMIN_PASSWORD'))
 
+def filter_dataframe_search(df, search_text):
+    """Filter dataframe based on search text across all columns"""
+    if search_text:
+        mask = df.astype(str).apply(lambda x: x.str.contains(search_text, case=False)).any(axis=1)
+        return df[mask]
+    return df
+
 def validate_dataframe(df):
     """Validate DataFrame structure and content"""
     errors = []
     
     # Check required columns
-    required_columns = ['Date', 'Email', 'Is Active', 'Subscription Included Reqs']
+    required_columns = ['Date', 'Email', 'Is Active', 'Subscription Included Reqs', 'Usage Based Reqs']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         errors.append(f"Missing required columns: {', '.join(missing_columns)}")
@@ -64,6 +71,12 @@ def validate_dataframe(df):
     elif (df['Subscription Included Reqs'] < 0).any():
         errors.append("'Subscription Included Reqs' column contains negative values")
     
+    # Validate Usage Based Reqs column
+    if not np.issubdtype(df['Usage Based Reqs'].dtype, np.number):
+        errors.append("'Usage Based Reqs' column must contain numeric values")
+    elif (df['Usage Based Reqs'] < 0).any():
+        errors.append("'Usage Based Reqs' column contains negative values")
+    
     # Check for empty values
     for col in required_columns:
         if df[col].isnull().any():
@@ -82,6 +95,7 @@ def get_user_stats(filtered_df):
     unique_users = filtered_df.groupby('Email').agg({
         'Is Active': 'max',  # True if user was active on any day
         'Subscription Included Reqs': 'sum',  # Total subscription requests
+        'Usage Based Reqs': 'sum',  # Total usage based requests
         'Manager': 'first',  # Take first manager value
         'Director': 'first',  # Take first director value
         'Department': 'first'  # Take first department value
@@ -91,12 +105,6 @@ def get_user_stats(filtered_df):
     unique_users = unique_users.merge(active_days, on='Email', how='left')
     unique_users['Active Days'] = unique_users['Active Days'].fillna(0).astype(int)  # Convert to integer
     return unique_users
-
-def filter_dataframe(df, search_text, column='Email'):
-    """Filter DataFrame based on search text"""
-    if search_text:
-        return df[df[column].str.contains(search_text, case=False, na=False)]
-    return df
 
 # Sidebar for navigation
 page = st.sidebar.radio("Navigation", ["Dashboard", "Charts", "Admin"])
@@ -451,19 +459,12 @@ elif page == "Charts":
             # Add expandable sections for each usage category
             st.subheader("Detailed User Lists by Category")
             
-            def filter_dataframe(df, search_text):
-                """Filter dataframe based on search text across all columns"""
-                if search_text:
-                    mask = df.astype(str).apply(lambda x: x.str.contains(search_text, case=False)).any(axis=1)
-                    return df[mask]
-                return df
-            
             # 100% Usage Users
             with st.expander("100% Usage (20+ days active)", expanded=False):
                 users_100 = user_stats[user_stats['Active Days'] >= 20]
                 if not users_100.empty:
                     search_100 = st.text_input("Search in 100% Usage category", key="search_100")
-                    filtered_100 = filter_dataframe(users_100[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_100)
+                    filtered_100 = filter_dataframe_search(users_100[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_100)
                     if filtered_100.empty:
                         st.info("No matching users found")
                     else:
@@ -476,7 +477,7 @@ elif page == "Charts":
                 users_75 = user_stats[(user_stats['Active Days'] >= 15) & (user_stats['Active Days'] < 20)]
                 if not users_75.empty:
                     search_75 = st.text_input("Search in 75% Usage category", key="search_75")
-                    filtered_75 = filter_dataframe(users_75[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_75)
+                    filtered_75 = filter_dataframe_search(users_75[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_75)
                     if filtered_75.empty:
                         st.info("No matching users found")
                     else:
@@ -489,7 +490,7 @@ elif page == "Charts":
                 users_50 = user_stats[(user_stats['Active Days'] >= 10) & (user_stats['Active Days'] < 15)]
                 if not users_50.empty:
                     search_50 = st.text_input("Search in 50% Usage category", key="search_50")
-                    filtered_50 = filter_dataframe(users_50[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_50)
+                    filtered_50 = filter_dataframe_search(users_50[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_50)
                     if filtered_50.empty:
                         st.info("No matching users found")
                     else:
@@ -502,7 +503,7 @@ elif page == "Charts":
                 users_25 = user_stats[(user_stats['Active Days'] >= 5) & (user_stats['Active Days'] < 10)]
                 if not users_25.empty:
                     search_25 = st.text_input("Search in 25% Usage category", key="search_25")
-                    filtered_25 = filter_dataframe(users_25[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_25)
+                    filtered_25 = filter_dataframe_search(users_25[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_25)
                     if filtered_25.empty:
                         st.info("No matching users found")
                     else:
@@ -515,7 +516,7 @@ elif page == "Charts":
                 users_less_25 = user_stats[user_stats['Active Days'] < 5]
                 if not users_less_25.empty:
                     search_less_25 = st.text_input("Search in < 25% Usage category", key="search_less_25")
-                    filtered_less_25 = filter_dataframe(users_less_25[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_less_25)
+                    filtered_less_25 = filter_dataframe_search(users_less_25[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_less_25)
                     if filtered_less_25.empty:
                         st.info("No matching users found")
                     else:
@@ -619,11 +620,15 @@ elif page == "Charts":
             
             # Calculate user categories
             period_user_stats = get_user_stats(df_filtered)
-            active_users = period_user_stats[period_user_stats['Subscription Included Reqs'] > 0]
-            # Dormant users are those who were active (opened the app) but made no subscription requests
+            active_users = period_user_stats[
+                (period_user_stats['Subscription Included Reqs'] > 0) | 
+                (period_user_stats['Usage Based Reqs'] > 0)
+            ]
+            # Dormant users are those who were active (opened the app) but made no requests
             dormant_users = period_user_stats[
-                (period_user_stats['Is Active'] > 0) & 
-                (period_user_stats['Subscription Included Reqs'] == 0)
+                (period_user_stats['Active Days'] > 0) & 
+                (period_user_stats['Subscription Included Reqs'] == 0) &
+                (period_user_stats['Usage Based Reqs'] == 0)
             ]
             # Inactive users are those who didn't open the app at all
             inactive_users = period_user_stats[period_user_stats['Is Active'] == 0]
@@ -667,11 +672,17 @@ elif page == "Charts":
             # Add expandable sections for user lists
             st.subheader("Detailed User Lists")
             
-            # Active Users List
+            # Display active users list
             with st.expander("View Active Users", expanded=False):
-                if not active_users.empty:
+                # Get active users - those who have made either type of requests
+                active_df = period_user_stats[
+                    (period_user_stats['Subscription Included Reqs'] > 0) |
+                    (period_user_stats['Usage Based Reqs'] > 0)
+                ]
+                
+                if not active_df.empty:
                     search_active = st.text_input("Search active users", key="search_active")
-                    filtered_active = filter_dataframe(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_active)
+                    filtered_active = filter_dataframe_search(active_df[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_active)
                     if filtered_active.empty:
                         st.info("No matching users found")
                     else:
@@ -681,9 +692,16 @@ elif page == "Charts":
             
             # Inactive Users List
             with st.expander("View Inactive Users", expanded=False):
-                if not inactive_users.empty:
+                # Get inactive users - those who didn't open the app and made no requests
+                inactive_df = period_user_stats[
+                    (period_user_stats['Active Days'] == 0) &
+                    (period_user_stats['Subscription Included Reqs'] == 0) &
+                    (period_user_stats['Usage Based Reqs'] == 0)
+                ]
+                
+                if not inactive_df.empty:
                     search_inactive = st.text_input("Search inactive users", key="search_inactive")
-                    filtered_inactive = filter_dataframe(inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_inactive)
+                    filtered_inactive = filter_dataframe_search(inactive_df[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_inactive)
                     if filtered_inactive.empty:
                         st.info("No matching users found")
                     else:
@@ -693,15 +711,16 @@ elif page == "Charts":
             
             # Dormant Users List
             with st.expander("View Dormant Users", expanded=False):
-                # Get dormant users - those who were active but made no subscription requests
+                # Get dormant users - those who were active but made no requests of either type
                 dormant_df = period_user_stats[
                     (period_user_stats['Active Days'] > 0) & 
-                    (period_user_stats['Subscription Included Reqs'] == 0)
+                    (period_user_stats['Subscription Included Reqs'] == 0) &
+                    (period_user_stats['Usage Based Reqs'] == 0)
                 ]
                 
                 if not dormant_df.empty:
                     search_dormant = st.text_input("Search dormant users", key="search_dormant")
-                    filtered_dormant = filter_dataframe(dormant_df[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_dormant)
+                    filtered_dormant = filter_dataframe_search(dormant_df[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_dormant)
                     if filtered_dormant.empty:
                         st.info("No matching users found")
                     else:
@@ -773,7 +792,7 @@ elif page == "Charts":
             with st.expander("View All Inactive Users", expanded=False):
                 if not inactive_users.empty:
                     search_inactive_detail = st.text_input("Search inactive users", key="search_inactive_detail")
-                    filtered_inactive_detail = filter_dataframe(inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_inactive_detail)
+                    filtered_inactive_detail = filter_dataframe_search(inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_inactive_detail)
                     if filtered_inactive_detail.empty:
                         st.info("No matching users found")
                     else:
@@ -844,7 +863,7 @@ elif page == "Charts":
             with st.expander("View All Active Users", expanded=False):
                 if not active_users.empty:
                     search_active_detail = st.text_input("Search active users", key="search_active_detail")
-                    filtered_active_detail = filter_dataframe(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']], search_active_detail)
+                    filtered_active_detail = filter_dataframe_search(active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']], search_active_detail)
                     if filtered_active_detail.empty:
                         st.info("No matching users found")
                     else:
@@ -923,21 +942,35 @@ else:  # Dashboard page
         # Format dates in a simple way
         st.caption(f"📅 Showing data for: {start_date:%B %d, %Y} to {end_date:%B %d, %Y}")
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             st.metric("Total Users", len(user_stats))
         with col2:
-            active_users = len(user_stats[user_stats['Subscription Included Reqs'] > 0])
+            active_users = len(user_stats[
+                (user_stats['Subscription Included Reqs'] > 0) |
+                (user_stats['Usage Based Reqs'] > 0)
+            ])
             st.metric("Active Users", active_users)
         with col3:
-            dormant_users = len(user_stats[(user_stats['Subscription Included Reqs'] == 0) & (user_stats['Active Days'] > 0)])
+            dormant_users = len(user_stats[
+                (user_stats['Active Days'] > 0) & 
+                (user_stats['Subscription Included Reqs'] == 0) &
+                (user_stats['Usage Based Reqs'] == 0)
+            ])
             st.metric("Dormant Users", dormant_users)
         with col4:
-            inactive_users = len(user_stats[(user_stats['Subscription Included Reqs'] == 0) & (user_stats['Active Days'] == 0)])
+            inactive_users = len(user_stats[
+                (user_stats['Active Days'] == 0) &
+                (user_stats['Subscription Included Reqs'] == 0) &
+                (user_stats['Usage Based Reqs'] == 0)
+            ])
             st.metric("Inactive Users", inactive_users)
         with col5:
-            total_requests = user_stats['Subscription Included Reqs'].sum()
-            st.metric("Total Subscription Requests", f"{total_requests:,}")
+            total_subscription_reqs = user_stats['Subscription Included Reqs'].sum()
+            st.metric("Total Subscription Requests", f"{total_subscription_reqs:,}")
+        with col6:
+            total_usage_reqs = user_stats['Usage Based Reqs'].sum()
+            st.metric("Total Usage Based Requests", f"{total_usage_reqs:,}")
         
         # Other filters
         search_text = st.sidebar.text_input("Search by Email")
@@ -954,25 +987,37 @@ else:  # Dashboard page
         # Apply filters
         filtered_stats = user_stats.copy()
         if search_text:
-            filtered_stats = filter_dataframe(filtered_stats, search_text)
+            filtered_stats = filter_dataframe_search(filtered_stats, search_text)
         if selected_director != "All":
             filtered_stats = filtered_stats[filtered_stats['Director'] == selected_director]
         
         # Split users into three categories
-        active_users = filtered_stats[filtered_stats['Subscription Included Reqs'] > 0]
-        dormant_users = filtered_stats[(filtered_stats['Subscription Included Reqs'] == 0) & (filtered_stats['Active Days'] > 0)]
-        inactive_users = filtered_stats[(filtered_stats['Subscription Included Reqs'] == 0) & (filtered_stats['Active Days'] == 0)]
+        active_users = filtered_stats[
+            (filtered_stats['Subscription Included Reqs'] > 0) |
+            (filtered_stats['Usage Based Reqs'] > 0)
+        ]
+        dormant_users = filtered_stats[
+            (filtered_stats['Subscription Included Reqs'] == 0) & 
+            (filtered_stats['Usage Based Reqs'] == 0) & 
+            (filtered_stats['Active Days'] > 0)
+        ]
+        inactive_users = filtered_stats[
+            (filtered_stats['Subscription Included Reqs'] == 0) & 
+            (filtered_stats['Usage Based Reqs'] == 0) & 
+            (filtered_stats['Active Days'] == 0)
+        ]
         
         # Display active users table first
         st.subheader(f"Active Users ({len(active_users)} users)")
-        st.caption("Users who have made subscription requests in the selected date range")
+        st.caption("Users who have made subscription or usage based requests in the selected date range")
         st.info("""
         - **Active Days**: Number of days the user opened Cursor
-        - **Subscription Included Reqs**: Number of requests made to AI
+        - **Subscription Included Reqs**: Number of subscription requests made to AI
+        - **Usage Based Reqs**: Number of usage based requests made to AI
         """)
         if len(active_users) > 0:
             st.dataframe(
-                active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False),
+                active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False),
                 width=1200
             )
         else:
@@ -985,14 +1030,15 @@ else:  # Dashboard page
         
         # Display dormant users table
         st.subheader(f"Dormant Users ({len(dormant_users)} users)")
-        st.caption("Users who opened Cursor but haven't made any subscription requests")
+        st.caption("Users who opened Cursor but haven't made any subscription or usage based requests")
         st.info("""
-        - **Active Days**: Number of days the user opened Cursor (but didn't make AI requests)
-        - **Subscription Included Reqs**: Will be 0 as these users haven't made any AI requests
+        - **Active Days**: Number of days the user opened Cursor (but didn't make any AI requests)
+        - **Subscription Included Reqs**: Will be 0 as these users haven't made any subscription requests
+        - **Usage Based Reqs**: Will be 0 as these users haven't made any usage based requests
         """)
         if len(dormant_users) > 0:
             st.dataframe(
-                dormant_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']].sort_values('Active Days', ascending=False),
+                dormant_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Active Days', ascending=False),
                 width=1200
             )
         else:
@@ -1012,7 +1058,7 @@ else:  # Dashboard page
         """)
         if len(inactive_users) > 0:
             st.dataframe(
-                inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Manager', 'Director', 'Department']].sort_values('Email'),
+                inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Email'),
                 width=1200
             )
         else:
