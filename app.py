@@ -373,10 +373,10 @@ elif page == "Charts":
             st.info("""
                 📊 **User Activity Categories:**
                 
-                • **Highly Active** (20+ days active)
-                • **Regular Users** (15-19 days active)
-                • **Moderate Users** (10-14 days active)
-                • **Low Activity** (1-9 days active)
+                • **100% Usage** (20+ days active)
+                • **75% Usage** (15-19 days active)
+                • **50% Usage** (10-14 days active)
+                • **< 50% Usage** (< 10 days active)
                 
                 *Hover over the chart for detailed user information*
                 """)
