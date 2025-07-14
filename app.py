@@ -985,12 +985,12 @@ else:  # Dashboard page
             # Add download button for all users (not just top 3)
             full_high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False)
             csv = full_high_usage_df.to_csv(index=False)
-            st.download_button(
-                label="Download as CSV",
-                data=csv,
-                file_name="high_usage_users.csv",
-                mime="text/csv",
-            )
+            # st.download_button(
+            #     label="Download as CSV",
+            #     data=csv,
+            #     file_name="high_usage_users.csv",
+            #     mime="text/csv",
+            # )
         else:
             st.info("No users found with both subscription included and usage based requests in the selected date range")
             
