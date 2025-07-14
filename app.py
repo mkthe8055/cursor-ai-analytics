@@ -908,6 +908,18 @@ else:  # Dashboard page
         # Get user statistics for filtered data
         user_stats = get_user_stats(df_filtered)
         
+        # Other filters
+        search_text = st.sidebar.text_input("Search by Email")
+        
+        # Get unique directors for filters
+        directors = sorted(user_stats['Director'].unique().tolist())
+        
+        selected_director = st.sidebar.selectbox(
+            "Filter by Director",
+            ["All"] + directors,
+            index=0
+        )
+        
         # Display date range info and summary statistics
         st.subheader("Summary Statistics")
         
@@ -943,18 +955,49 @@ else:  # Dashboard page
         with col6:
             total_usage_reqs = user_stats['Usage Based Reqs'].sum()
             st.metric("Total Usage Based Requests", f"{total_usage_reqs:,}")
+            
+        # Add spacing before next section
+        st.write("")
+        st.write("---")
+        st.write("")
         
-        # Other filters
-        search_text = st.sidebar.text_input("Search by Email")
+        # Display users who exceeded 500 requests
+        high_usage_users = user_stats[
+            (user_stats['Usage Based Reqs'] > 0) &
+            (user_stats['Subscription Included Reqs'] > 0)
+        ]
         
-        # Get unique directors for filters
-        directors = sorted(user_stats['Director'].unique().tolist())
+        # Apply filters to high usage users
+        filtered_high_usage = high_usage_users.copy()
+        if search_text:
+            filtered_high_usage = filter_dataframe_search(filtered_high_usage, search_text)
+        if selected_director != "All":
+            filtered_high_usage = filtered_high_usage[filtered_high_usage['Director'] == selected_director]
+            
+        total_high_usage = len(filtered_high_usage)
+        st.subheader("Top 3 Most Active Cursor Users")
+        st.caption(f"Out of {total_high_usage} users who exceed 500 requests or using premium models")
         
-        selected_director = st.sidebar.selectbox(
-            "Filter by Director",
-            ["All"] + directors,
-            index=0
-        )
+        if total_high_usage > 0:
+            high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False).head(3)
+            st.dataframe(high_usage_df, width=1200)
+            
+            # Add download button for all users (not just top 3)
+            full_high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False)
+            csv = full_high_usage_df.to_csv(index=False)
+            st.download_button(
+                label="Download as CSV",
+                data=csv,
+                file_name="high_usage_users.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No users found with both subscription included and usage based requests in the selected date range")
+            
+        # Add spacing before next section
+        st.write("")
+        st.write("---")
+        st.write("")
         
         # Apply filters
         filtered_stats = user_stats.copy()
@@ -988,9 +1031,16 @@ else:  # Dashboard page
         - **Usage Based Reqs**: Number of usage based requests made to AI
         """)
         if len(active_users) > 0:
-            st.dataframe(
-                active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False),
-                width=1200
+            active_df = active_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False)
+            st.dataframe(active_df, width=1200)
+            
+            # Add download button
+            csv = active_df.to_csv(index=False)
+            st.download_button(
+                label="Download as CSV",
+                data=csv,
+                file_name="active_users.csv",
+                mime="text/csv",
             )
         else:
             st.info("No active users found with current filters")
@@ -1009,9 +1059,16 @@ else:  # Dashboard page
         - **Usage Based Reqs**: Will be 0 as these users haven't made any usage based requests
         """)
         if len(dormant_users) > 0:
-            st.dataframe(
-                dormant_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Active Days', ascending=False),
-                width=1200
+            dormant_df = dormant_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Active Days', ascending=False)
+            st.dataframe(dormant_df, width=1200)
+            
+            # Add download button
+            csv = dormant_df.to_csv(index=False)
+            st.download_button(
+                label="Download as CSV",
+                data=csv,
+                file_name="dormant_users.csv",
+                mime="text/csv",
             )
         else:
             st.info("No dormant users found with current filters")
@@ -1029,9 +1086,16 @@ else:  # Dashboard page
         - **Subscription Included Reqs**: Will be 0 as these users haven't made any AI requests
         """)
         if len(inactive_users) > 0:
-            st.dataframe(
-                inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Email'),
-                width=1200
+            inactive_df = inactive_users[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Email')
+            st.dataframe(inactive_df, width=1200)
+            
+            # Add download button
+            csv = inactive_df.to_csv(index=False)
+            st.download_button(
+                label="Download as CSV",
+                data=csv,
+                file_name="inactive_users.csv",
+                mime="text/csv",
             )
         else:
             st.info("No inactive users found with current filters") 
