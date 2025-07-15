@@ -107,9 +107,11 @@ def get_user_stats(filtered_df):
     return unique_users
 
 # Sidebar for navigation
-page = st.sidebar.radio("Navigation", ["Dashboard", "Charts", "Admin"])
+page = st.sidebar.radio("Navigation", ["Dashboard", "Charts"])
 
-if page == "Admin":
+# Check for admin route in query parameters
+query_params = st.experimental_get_query_params()
+if query_params.get("route") == ["admin"]:
     st.title("Admin Panel")
     
     if not st.session_state.authenticated:
@@ -961,42 +963,36 @@ else:  # Dashboard page
         st.write("---")
         st.write("")
         
-        # Display users who exceeded 500 requests
-        high_usage_users = user_stats[
-            (user_stats['Usage Based Reqs'] > 0) &
-            (user_stats['Subscription Included Reqs'] > 0)
-        ]
+        # # Display users who exceeded 500 requests
+        # high_usage_users = user_stats[
+        #     (user_stats['Usage Based Reqs'] > 0) &
+        #     (user_stats['Subscription Included Reqs'] > 0)
+        # ]
         
-        # Apply filters to high usage users
-        filtered_high_usage = high_usage_users.copy()
-        if search_text:
-            filtered_high_usage = filter_dataframe_search(filtered_high_usage, search_text)
-        if selected_director != "All":
-            filtered_high_usage = filtered_high_usage[filtered_high_usage['Director'] == selected_director]
+        # # Apply filters to high usage users
+        # filtered_high_usage = high_usage_users.copy()
+        # if search_text:
+        #     filtered_high_usage = filter_dataframe_search(filtered_high_usage, search_text)
+        # if selected_director != "All":
+        #     filtered_high_usage = filtered_high_usage[filtered_high_usage['Director'] == selected_director]
             
-        total_high_usage = len(filtered_high_usage)
-        st.subheader("Top 3 Most Active Cursor Users")
-        st.caption(f"Out of {total_high_usage} users who exceed 500 requests or using premium models")
+        # total_high_usage = len(filtered_high_usage)
+        # st.subheader("Top 3 Most Active Cursor Users")
+        # st.caption(f"Out of {total_high_usage} users who exceed 500 requests or using premium models")
         
-        if total_high_usage > 0:
-            high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False).head(3)
-            st.dataframe(high_usage_df, width=1200)
+        # if total_high_usage > 0:
+        #     high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False).head(3)
+        #     st.dataframe(high_usage_df, width=1200)
             
-            # Add download button for all users (not just top 3)
-            full_high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False)
-            csv = full_high_usage_df.to_csv(index=False)
-            # st.download_button(
-            #     label="Download as CSV",
-            #     data=csv,
-            #     file_name="high_usage_users.csv",
-            #     mime="text/csv",
-            # )
-        else:
-            st.info("No users found with both subscription included and usage based requests in the selected date range")
+        #     # Add download button for all users (not just top 3)
+        #     full_high_usage_df = filtered_high_usage[['Email', 'Active Days', 'Subscription Included Reqs', 'Usage Based Reqs', 'Manager', 'Director', 'Department']].sort_values('Subscription Included Reqs', ascending=False)
+        #     csv = full_high_usage_df.to_csv(index=False)
+        # else:
+        #     st.info("No users found with both subscription included and usage based requests in the selected date range")
             
         # Add spacing before next section
-        st.write("")
-        st.write("---")
+        # st.write("")
+        # st.write("---")
         st.write("")
         
         # Apply filters
