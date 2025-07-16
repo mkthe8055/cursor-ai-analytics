@@ -21,17 +21,52 @@ st.set_page_config(page_title="Cursor AI Metrics Analysis", layout="wide")
 load_dotenv()
 
 # Initialize session state
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
 if 'upload_success' not in st.session_state:
     st.session_state.upload_success = False
 if 'last_uploaded_file' not in st.session_state:
     st.session_state.last_uploaded_file = None
 
 def authenticate_user(username, password):
-    """Authenticate user against environment variables"""
+    """Authenticate regular user against environment variables"""
+    return (username == os.getenv('USER_USERNAME') and 
+            password == os.getenv('USER_PASSWORD'))
+
+def authenticate_admin(username, password):
+    """Authenticate admin user against environment variables"""
     return (username == os.getenv('ADMIN_USERNAME') and 
             password == os.getenv('ADMIN_PASSWORD'))
+
+# Check for admin route in query parameters
+query_params = st.experimental_get_query_params()
+is_admin_route = query_params.get("route") == ["admin"]
+
+# Show simple login prompt if not logged in and not on admin route
+if not st.session_state.logged_in and not is_admin_route:
+    # Add some empty space to center vertically
+    st.write("")
+    st.write("")
+    st.write("")
+    st.write("")
+    
+    # Simple centered text and form
+    st.markdown("<h3 style='text-align: center;'>Please login to access the Cursor AI Analytics dashboard</h3>", unsafe_allow_html=True)
+    
+    # Simple login form without any containers
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.text_input("Username", key="login_username")
+        st.text_input("Password", type="password", key="login_password")
+        if st.button("Login", key="main_login_btn"):
+            if authenticate_user(st.session_state.login_username, st.session_state.login_password):
+                st.session_state.logged_in = True
+                st.experimental_rerun()
+            else:
+                st.error("Invalid credentials")
+    
+    # Prevent the full app from loading
+    st.stop()
 
 def filter_dataframe_search(df, search_text):
     """Filter dataframe based on search text across all columns"""
@@ -109,25 +144,33 @@ def get_user_stats(filtered_df):
 # Sidebar for navigation
 page = st.sidebar.radio("Navigation", ["Dashboard", "Charts"])
 
-# Check for admin route in query parameters
-query_params = st.experimental_get_query_params()
-if query_params.get("route") == ["admin"]:
+# Add logout button in sidebar if logged in
+if st.session_state.logged_in:
+    st.sidebar.markdown("---")
+    if st.sidebar.button("Logout", key="sidebar_logout_btn"):
+        st.session_state.logged_in = False
+        st.session_state.upload_success = False
+        st.session_state.last_uploaded_file = None
+        st.experimental_rerun()
+
+# Handle admin route
+if is_admin_route:
     st.title("Admin Panel")
     
-    if not st.session_state.authenticated:
+    if not st.session_state.logged_in:
         st.info("Please login to access the admin panel")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        username = st.text_input("Admin Username", key="admin_username")
+        password = st.text_input("Admin Password", type="password", key="admin_password")
         
-        if st.button("Login"):
-            if authenticate_user(username, password):
-                st.session_state.authenticated = True
+        if st.button("Admin Login", key="admin_login_btn"):
+            if authenticate_admin(username, password):
+                st.session_state.logged_in = True
                 st.success("Successfully logged in!")
                 st.experimental_rerun()
             else:
-                st.error("Invalid credentials")
+                st.error("Invalid admin credentials")
     
-    if st.session_state.authenticated:
+    if st.session_state.logged_in:
         st.subheader("Current Data")
         current_file = get_current_file_info()
         if current_file:
@@ -135,7 +178,7 @@ if query_params.get("route") == ["admin"]:
             st.write(f"Size: {current_file['size_mb']} MB")
             st.write(f"Records: {current_file['record_count']}")
             
-            if st.button("Delete Current Data"):
+            if st.button("Delete Current Data", key="delete_data_btn"):
                 if delete_current_file():
                     st.success("Data deleted successfully!")
                     st.experimental_rerun()
@@ -178,8 +221,8 @@ if query_params.get("route") == ["admin"]:
                 st.error(f"❌ Error processing file: {str(e)}")
                 st.info("Please try uploading the file again or contact support if the issue persists.")
             
-        if st.button("Logout"):
-            st.session_state.authenticated = False
+        if st.button("Logout", key="admin_logout_btn"):
+            st.session_state.logged_in = False
             st.session_state.upload_success = False
             st.session_state.last_uploaded_file = None
             st.experimental_rerun()
