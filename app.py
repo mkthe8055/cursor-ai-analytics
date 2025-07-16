@@ -610,13 +610,16 @@ if not is_admin_route:
             color: #666;
         }
         .google-btn {
-            background-color: #34495e;
+            background-color: #4285f4;
             color: white;
             padding: 12px 24px;
             text-decoration: none;
             border-radius: 6px;
             font-weight: 600;
             display: inline-block;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -629,9 +632,12 @@ if not is_admin_route:
             <h1 class="login-title">Cursor AI Metrics Analysis</h1>
             <p class="login-subtitle">Welcome to Celigo's Cursor AI Analytics Dashboard</p>
             <p style="margin-bottom: 2rem; color: #888;">Please sign in with your Celigo Google account to access the dashboard.</p>
-            <a href="{auth_url}" target="_self" class="google-btn">
-                🔐 Sign with Google
-            </a>
+            <button onclick="window.open('{auth_url}', '_blank', 'width=500,height=600,scrollbars=yes,resizable=yes')" class="google-btn">
+                🔐 Sign in with Google
+            </button>
+            <p style="margin-top: 1rem; font-size: 12px; color: #666;">
+                After signing in, please refresh this page to continue.
+            </p>
         </div>
         """, unsafe_allow_html=True)
         
