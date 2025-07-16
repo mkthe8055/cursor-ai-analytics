@@ -1,12 +1,18 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 from dotenv import load_dotenv
 import plotly.express as px
 import numpy as np
 import time
+import hashlib
+import json
+import tempfile
+import requests
+import urllib.parse
 from database import (
     save_data_to_db,
     load_data_from_db,
@@ -20,53 +26,445 @@ st.set_page_config(page_title="Cursor AI Metrics Analysis", layout="wide")
 # Load environment variables
 load_dotenv()
 
+# Session management functions
+def get_session_file_path():
+    """Get the path for storing session data"""
+    temp_dir = tempfile.gettempdir()
+    return os.path.join(temp_dir, "streamlit_admin_sessions.json")
+
+def create_session_token(username):
+    """Create a unique session token"""
+    timestamp = str(time.time())
+    return hashlib.sha256(f"{username}_{timestamp}".encode()).hexdigest()
+
+def create_session_id():
+    """Create a short session ID for URL (maps to full token)"""
+    return hashlib.md5(str(time.time()).encode()).hexdigest()[:12]
+
+def save_session(token, username, expiry_hours=24):
+    """Save session token with expiration and create session ID mapping"""
+    session_file = get_session_file_path()
+    expiry_time = datetime.now() + timedelta(hours=expiry_hours)
+    
+    # Create a short session ID for the URL
+    session_id = create_session_id()
+    
+    # Load existing sessions
+    sessions = {}
+    if os.path.exists(session_file):
+        try:
+            with open(session_file, 'r') as f:
+                sessions = json.load(f)
+        except:
+            sessions = {}
+    
+    # Clean expired sessions
+    current_time = datetime.now()
+    sessions = {k: v for k, v in sessions.items() 
+                if datetime.fromisoformat(v['expiry']) > current_time}
+    
+    # Add new session with both token and session_id mapping
+    sessions[token] = {
+        'username': username,
+        'expiry': expiry_time.isoformat(),
+        'created': datetime.now().isoformat(),
+        'session_id': session_id
+    }
+    
+    # Also add reverse mapping for session_id to token
+    sessions[f"sid_{session_id}"] = {
+        'token': token,
+        'expiry': expiry_time.isoformat()
+    }
+    
+    # Save sessions
+    try:
+        with open(session_file, 'w') as f:
+            json.dump(sessions, f)
+        return session_id  # Return session ID instead of boolean
+    except:
+        return None
+
+def validate_session(token_or_session_id):
+    """Validate session token or session ID"""
+    if not token_or_session_id:
+        return False
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return False
+    
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        # Check if it's a session ID (shorter, needs sid_ prefix lookup)
+        session_key = f"sid_{token_or_session_id}" if len(token_or_session_id) == 12 else token_or_session_id
+        
+        if session_key not in sessions:
+            return False
+        
+        session = sessions[session_key]
+        expiry_time = datetime.fromisoformat(session['expiry'])
+        
+        if datetime.now() > expiry_time:
+            # Session expired, remove it and its mapping
+            if session_key.startswith('sid_'):
+                # Remove both session ID mapping and the actual token
+                actual_token = session.get('token')
+                if actual_token and actual_token in sessions:
+                    del sessions[actual_token]
+            else:
+                # Remove token and its session ID mapping
+                session_id = session.get('session_id')
+                if session_id and f"sid_{session_id}" in sessions:
+                    del sessions[f"sid_{session_id}"]
+            
+            del sessions[session_key]
+            with open(session_file, 'w') as f:
+                json.dump(sessions, f)
+            return False
+        
+        return True
+    except:
+        return False
+
+def get_token_from_session_id(session_id):
+    """Get the actual token from session ID"""
+    if not session_id:
+        return None
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return None
+    
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        session_key = f"sid_{session_id}"
+        if session_key in sessions:
+            return sessions[session_key].get('token')
+    except:
+        pass
+    
+    return None
+
+def clear_session(token):
+    """Clear a specific session token"""
+    if not token:
+        return
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return
+    
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        if token in sessions:
+            del sessions[token]
+            with open(session_file, 'w') as f:
+                json.dump(sessions, f)
+    except:
+        pass
+
+def get_admin_session_token():
+    """Get admin session token from URL session ID or session state"""
+    
+    # Check URL for session ID first (for persistence across refreshes)
+    query_params = st.query_params
+    session_id = query_params.get("sid")
+    
+    if session_id and validate_session(session_id):
+        # Get the actual token from session ID
+        token = get_token_from_session_id(session_id)
+        if token:
+            # Store in session state for faster access
+            st.session_state.admin_session_token = token
+            return token
+    
+    # Check session state (for same-session access)
+    if 'admin_session_token' in st.session_state:
+        token = st.session_state.admin_session_token
+        if validate_session(token):
+            return token
+        else:
+            # Invalid token, clear it
+            del st.session_state.admin_session_token
+    
+    return None
+
 # Initialize session state
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
 if 'upload_success' not in st.session_state:
     st.session_state.upload_success = False
 if 'last_uploaded_file' not in st.session_state:
     st.session_state.last_uploaded_file = None
-
-def authenticate_user(username, password):
-    """Authenticate regular user against environment variables"""
-    return (username == os.getenv('USER_USERNAME') and 
-            password == os.getenv('USER_PASSWORD'))
 
 def authenticate_admin(username, password):
     """Authenticate admin user against environment variables"""
     return (username == os.getenv('ADMIN_USERNAME') and 
             password == os.getenv('ADMIN_PASSWORD'))
 
-# Check for admin route in query parameters
-query_params = st.experimental_get_query_params()
-is_admin_route = query_params.get("route") == ["admin"]
+# Google OAuth functions
+def get_google_auth_url():
+    """Generate Google OAuth authorization URL"""
+    client_id = os.getenv('GOOGLE_CLIENT_ID')
+    redirect_uri = os.getenv('REDIRECT_URI')
+    
+    # Ensure no trailing slash for consistency
+    if redirect_uri and redirect_uri.endswith('/'):
+        redirect_uri = redirect_uri[:-1]
+    
+    auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={client_id}&"
+        f"redirect_uri={urllib.parse.quote(redirect_uri)}&"
+        f"scope=openid email profile&"
+        f"response_type=code&"
+        f"access_type=offline&"
+        f"prompt=consent"
+    )
+    return auth_url
 
-# Show simple login prompt if not logged in and not on admin route
-if not st.session_state.logged_in and not is_admin_route:
-    # Add some empty space to center vertically
-    st.write("")
-    st.write("")
-    st.write("")
-    st.write("")
+def exchange_code_for_token(auth_code):
+    """Exchange authorization code for access token"""
+    client_id = os.getenv('GOOGLE_CLIENT_ID')
+    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    redirect_uri = os.getenv('REDIRECT_URI')
     
-    # Simple centered text and form
-    st.markdown("<h3 style='text-align: center;'>Please login to access the Cursor AI Analytics dashboard</h3>", unsafe_allow_html=True)
+    # Ensure no trailing slash for consistency
+    if redirect_uri and redirect_uri.endswith('/'):
+        redirect_uri = redirect_uri[:-1]
     
-    # Simple login form without any containers
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        st.text_input("Username", key="login_username")
-        st.text_input("Password", type="password", key="login_password")
-        if st.button("Login", key="main_login_btn"):
-            if authenticate_user(st.session_state.login_username, st.session_state.login_password):
-                st.session_state.logged_in = True
-                st.experimental_rerun()
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'code': auth_code,
+        'grant_type': 'authorization_code',
+        'redirect_uri': redirect_uri
+    }
+    
+    try:
+        response = requests.post(token_url, data=data)
+        return response.json()
+    except:
+        return None
+
+def get_user_info(access_token):
+    """Get user information from Google"""
+    user_info_url = f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
+    
+    try:
+        response = requests.get(user_info_url)
+        return response.json()
+    except:
+        return None
+
+def is_celigo_employee(email):
+    """Check if email belongs to Celigo"""
+    if not email:
+        return False
+    return email.lower().endswith('@celigo.com')
+
+def save_user_session(user_info, expiry_hours=24):
+    """Save user session similar to admin session"""
+    session_file = get_session_file_path()
+    expiry_time = datetime.now() + timedelta(hours=expiry_hours)
+    
+    # Create session token and ID for user
+    user_token = create_session_token(user_info['email'])
+    session_id = create_session_id()
+    
+    # Load existing sessions
+    sessions = {}
+    if os.path.exists(session_file):
+        try:
+            with open(session_file, 'r') as f:
+                sessions = json.load(f)
+        except:
+            sessions = {}
+    
+    # Clean expired sessions
+    current_time = datetime.now()
+    sessions = {k: v for k, v in sessions.items() 
+                if datetime.fromisoformat(v['expiry']) > current_time}
+    
+    # Add new user session
+    sessions[user_token] = {
+        'email': user_info['email'],
+        'name': user_info.get('name', ''),
+        'expiry': expiry_time.isoformat(),
+        'created': datetime.now().isoformat(),
+        'session_id': session_id,
+        'type': 'user'  # Distinguish from admin sessions
+    }
+    
+    # Add session ID mapping
+    sessions[f"user_sid_{session_id}"] = {
+        'token': user_token,
+        'expiry': expiry_time.isoformat()
+    }
+    
+    # Save sessions
+    try:
+        with open(session_file, 'w') as f:
+            json.dump(sessions, f)
+        return session_id
+    except:
+        return None
+
+def get_user_session_token():
+    """Get user session token from URL session ID or session state"""
+    
+    # Check URL for user session ID first
+    query_params = st.query_params
+    user_session_id = query_params.get("user_sid")
+    
+    if user_session_id and validate_user_session(user_session_id):
+        # Get the actual token from session ID
+        token = get_token_from_user_session_id(user_session_id)
+        if token:
+            # Store in session state for faster access
+            st.session_state.user_session_token = token
+            return token
+    
+    # Check session state
+    if 'user_session_token' in st.session_state:
+        token = st.session_state.user_session_token
+        if validate_user_session(token):
+            return token
+        else:
+            # Invalid token, clear it
+            del st.session_state.user_session_token
+    
+    return None
+
+def validate_user_session(token_or_session_id):
+    """Validate user session token or session ID"""
+    if not token_or_session_id:
+        return False
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return False
+    
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        # Check if it's a user session ID (needs user_sid_ prefix lookup)
+        session_key = f"user_sid_{token_or_session_id}" if len(token_or_session_id) == 12 else token_or_session_id
+        
+        if session_key not in sessions:
+            return False
+        
+        session = sessions[session_key]
+        expiry_time = datetime.fromisoformat(session['expiry'])
+        
+        if datetime.now() > expiry_time:
+            # Session expired, remove it and its mapping
+            if session_key.startswith('user_sid_'):
+                # Remove both session ID mapping and the actual token
+                actual_token = session.get('token')
+                if actual_token and actual_token in sessions:
+                    del sessions[actual_token]
             else:
-                st.error("Invalid credentials")
+                # Remove token and its session ID mapping
+                session_id = session.get('session_id')
+                if session_id and f"user_sid_{session_id}" in sessions:
+                    del sessions[f"user_sid_{session_id}"]
+            
+            del sessions[session_key]
+            with open(session_file, 'w') as f:
+                json.dump(sessions, f)
+            return False
+        
+        return True
+    except:
+        return False
+
+def get_token_from_user_session_id(session_id):
+    """Get the actual user token from session ID"""
+    if not session_id:
+        return None
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return None
     
-    # Prevent the full app from loading
-    st.stop()
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        session_key = f"user_sid_{session_id}"
+        if session_key in sessions:
+            return sessions[session_key].get('token')
+    except:
+        pass
+    
+    return None
+
+def get_user_info_from_token(token):
+    """Get user info from session token"""
+    if not token:
+        return None
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return None
+    
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        if token in sessions:
+            session = sessions[token]
+            if session.get('type') == 'user':
+                return {
+                    'email': session.get('email'),
+                    'name': session.get('name'),
+                    'expiry': session.get('expiry')
+                }
+    except:
+        pass
+    
+    return None
+
+def clear_user_session(token):
+    """Clear user session"""
+    if not token:
+        return
+        
+    session_file = get_session_file_path()
+    if not os.path.exists(session_file):
+        return
+    
+    try:
+        with open(session_file, 'r') as f:
+            sessions = json.load(f)
+        
+        if token in sessions:
+            session = sessions[token]
+            session_id = session.get('session_id')
+            
+            # Remove session ID mapping
+            if session_id and f"user_sid_{session_id}" in sessions:
+                del sessions[f"user_sid_{session_id}"]
+            
+            # Remove main session
+            del sessions[token]
+            
+            with open(session_file, 'w') as f:
+                json.dump(sessions, f)
+    except:
+        pass
+
+# Check for admin route in query parameters
+query_params = st.query_params
+is_admin_route = query_params.get("route") == "admin"
 
 def filter_dataframe_search(df, search_text):
     """Filter dataframe based on search text across all columns"""
@@ -141,36 +539,182 @@ def get_user_stats(filtered_df):
     unique_users['Active Days'] = unique_users['Active Days'].fillna(0).astype(int)  # Convert to integer
     return unique_users
 
+# Handle Google OAuth for main dashboard (non-admin)
+if not is_admin_route:
+    # Check for Google OAuth callback
+    query_params = st.query_params
+    auth_code = query_params.get("code")
+    
+    if auth_code:
+        # Handle OAuth callback
+        token_response = exchange_code_for_token(auth_code)
+        if token_response and 'access_token' in token_response:
+            user_info = get_user_info(token_response['access_token'])
+            if user_info and is_celigo_employee(user_info.get('email')):
+                # Valid Celigo employee, create session
+                user_session_id = save_user_session(user_info)
+                if user_session_id:
+                    st.session_state.user_session_token = get_token_from_user_session_id(user_session_id)
+                    
+                    # Clean up ALL OAuth parameters and only keep user_sid
+                    # Clear all possible OAuth parameters
+                    oauth_params_to_remove = [
+                        "code", "state", "scope", "authuser", "hd", "prompt", 
+                        "session_state", "access_type", "response_type"
+                    ]
+                    
+                    # Remove all OAuth parameters
+                    for param in oauth_params_to_remove:
+                        if param in st.query_params:
+                            del st.query_params[param]
+                    
+                    # Set only the user session ID
+                    st.query_params.user_sid = user_session_id
+                    
+                    st.success("Successfully logged in!")
+                    st.rerun()
+                else:
+                    st.error("Failed to create session")
+            else:
+                st.error("Access denied. Only Celigo employees can access this dashboard.")
+                st.stop()
+        else:
+            st.error("Authentication failed. Please try again.")
+            st.stop()
+    
+    # Check for existing user session
+    user_token = get_user_session_token()
+    
+    if not user_token:
+        # No valid session, show login
+        st.markdown("""
+        <style>
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            min-height: 60vh;
+            padding: 2rem;
+        }
+        .login-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+        .login-subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            color: #666;
+        }
+        .google-btn {
+            background-color: #34495e;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            display: inline-block;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create Google OAuth login button
+        auth_url = get_google_auth_url()
+        
+        st.markdown(f"""
+        <div class="login-container">
+            <h1 class="login-title">Cursor AI Metrics Analysis</h1>
+            <p class="login-subtitle">Welcome to Celigo's Cursor AI Analytics Dashboard</p>
+            <p style="margin-bottom: 2rem; color: #888;">Please sign in with your Celigo Google account to access the dashboard.</p>
+            <a href="{auth_url}" target="_self" class="google-btn">
+                🔐 Sign with Google
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.stop()
+    
+    # User is authenticated, show user info and logout option
+    user_info = get_user_info_from_token(user_token)
+    if user_info:
+        # Add user info to sidebar
+        # st.sidebar.markdown("---")
+        st.sidebar.markdown(f"**👤 Logged in as:**")
+        st.sidebar.markdown(f"{user_info['name']}")
+        st.sidebar.markdown(f"{user_info['email']}")
+        
+        # Add logout button
+        if st.sidebar.button("🚪 Logout", key="user_logout_btn"):
+            clear_user_session(user_token)
+            if 'user_session_token' in st.session_state:
+                del st.session_state.user_session_token
+            # Clear user session ID from URL
+            if "user_sid" in st.query_params:
+                del st.query_params.user_sid
+            st.success("Successfully logged out!")
+            st.rerun()
+
 # Sidebar for navigation
 page = st.sidebar.radio("Navigation", ["Dashboard", "Charts"])
-
-# Add logout button in sidebar if logged in
-if st.session_state.logged_in:
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Logout", key="sidebar_logout_btn"):
-        st.session_state.logged_in = False
-        st.session_state.upload_success = False
-        st.session_state.last_uploaded_file = None
-        st.experimental_rerun()
 
 # Handle admin route
 if is_admin_route:
     st.title("Admin Panel")
     
-    if not st.session_state.logged_in:
-        st.info("Please login to access the admin panel")
-        username = st.text_input("Admin Username", key="admin_username")
-        password = st.text_input("Admin Password", type="password", key="admin_password")
-        
-        if st.button("Admin Login", key="admin_login_btn"):
-            if authenticate_admin(username, password):
-                st.session_state.logged_in = True
-                st.success("Successfully logged in!")
-                st.experimental_rerun()
-            else:
-                st.error("Invalid admin credentials")
+    # Check for valid session token
+    session_token = get_admin_session_token()
     
-    if st.session_state.logged_in:
+    if not session_token:
+        st.info("Please login to access the admin panel")
+        
+        with st.form("admin_login_form"):
+            username = st.text_input("Admin Username")
+            password = st.text_input("Admin Password", type="password")
+            login_submitted = st.form_submit_button("Admin Login")
+            
+            if login_submitted:
+                if authenticate_admin(username, password):
+                    # Create session token
+                    new_token = create_session_token(username)
+                    session_id = save_session(new_token, username)
+                    if session_id:
+                        st.session_state.admin_session_token = new_token
+                        # Add session ID to URL (much shorter and safer than full token)
+                        st.query_params.route = "admin"
+                        st.query_params.sid = session_id
+                        st.success("Successfully logged in!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to create session")
+                else:
+                    st.error("Invalid admin credentials")
+    else:
+        # Show session status
+        query_params = st.query_params
+        session_id = query_params.get("sid")
+        
+        session_file = get_session_file_path()
+        if os.path.exists(session_file) and session_token:
+            try:
+                with open(session_file, 'r') as f:
+                    sessions = json.load(f)
+                if session_token in sessions:
+                    session_info = sessions[session_token]
+                    expiry_time = datetime.fromisoformat(session_info['expiry'])
+                    time_remaining = expiry_time - datetime.now()
+                    
+                    if time_remaining.total_seconds() > 3600:  # More than 1 hour
+                        hours_remaining = int(time_remaining.total_seconds() // 3600)
+                        # st.success(f"✅ Logged in as admin (Session expires in {hours_remaining} hours) | Session ID: {session_id}")
+                    else:  # Less than 1 hour
+                        minutes_remaining = int(time_remaining.total_seconds() // 60)
+                        # st.warning(f"⚠️ Logged in as admin (Session expires in {minutes_remaining} minutes) | Session ID: {session_id}")
+            except:
+                pass
+        
         st.subheader("Current Data")
         current_file = get_current_file_info()
         if current_file:
@@ -181,7 +725,7 @@ if is_admin_route:
             if st.button("Delete Current Data", key="delete_data_btn"):
                 if delete_current_file():
                     st.success("Data deleted successfully!")
-                    st.experimental_rerun()
+                    st.rerun()
         else:
             st.info("No data currently uploaded")
         
@@ -208,7 +752,7 @@ if is_admin_route:
                         if save_data_to_db(df):
                             st.session_state.upload_success = True
                             st.success("✅ Data uploaded successfully!")
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("❌ Failed to upload data")
             except pd.errors.EmptyDataError:
@@ -222,10 +766,20 @@ if is_admin_route:
                 st.info("Please try uploading the file again or contact support if the issue persists.")
             
         if st.button("Logout", key="admin_logout_btn"):
-            st.session_state.logged_in = False
+            # Clear the session token
+            if 'admin_session_token' in st.session_state:
+                clear_session(st.session_state.admin_session_token)
+                del st.session_state.admin_session_token
+            
+            # Clear session ID from URL
+            st.query_params.route = "admin"
+            if "sid" in st.query_params:
+                del st.query_params.sid
+            
             st.session_state.upload_success = False
             st.session_state.last_uploaded_file = None
-            st.experimental_rerun()
+            st.success("Successfully logged out!")
+            st.rerun()
 
 elif page == "Charts":
     st.title("Usage Analytics")
