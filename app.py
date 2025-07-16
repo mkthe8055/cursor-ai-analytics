@@ -608,17 +608,7 @@ if not is_admin_route:
             font-size: 1.2rem;
             margin-bottom: 2rem;
             color: #666;
-        }
-        .google-btn {
-            background-color: #4285f4;
-            color: white;
-            padding: 12px 24px;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            display: inline-block;
-            font-size: 14px;
-        }
+                }
         </style>
         """, unsafe_allow_html=True)
         
@@ -630,10 +620,46 @@ if not is_admin_route:
             <h1 class="login-title">Cursor AI Metrics Analysis</h1>
             <p class="login-subtitle">Welcome to Celigo's Cursor AI Analytics Dashboard</p>
             <p style="margin-bottom: 2rem; color: #888;">Please sign in with your Celigo Google account to access the dashboard.</p>
-            <a href="{auth_url}" target="_top" class="google-btn">
-                🔐 Sign in with Google
-            </a>
         </div>
+        """, unsafe_allow_html=True)
+        
+                # Center the button using columns
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col2:
+            st.markdown(f"""
+            <style>
+            .google-oauth-btn {{
+                background-color: #4285f4 !important;
+                color: #ffffff !important;
+                padding: 12px 24px;
+                text-decoration: none !important;
+                border-radius: 6px;
+                font-weight: bold !important;
+                display: block;
+                text-align: center;
+                font-size: 15px !important;
+                margin: 10px 0;
+                text-shadow: none !important;
+                border: none !important;
+                outline: none !important;
+            }}
+            .google-oauth-btn:hover,
+            .google-oauth-btn:visited,
+            .google-oauth-btn:active,
+            .google-oauth-btn:focus {{
+                color: #ffffff !important;
+                text-decoration: none !important;
+                background-color: #3367d6 !important;
+            }}
+            </style>
+            <a href="{auth_url}" target="_blank" class="google-oauth-btn">🔐 Sign in with Google</a>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <p style="text-align: center; font-size: 12px; color: #666; margin-top: 10px;">
+           
+        </p>
         """, unsafe_allow_html=True)
         
         st.stop()
