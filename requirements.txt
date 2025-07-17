@@ -6,3 +6,4 @@ cryptography==42.0.5
 plotly==5.18.0
 altair==4.2.2
 numpy==1.24.3
+requests==2.31.0

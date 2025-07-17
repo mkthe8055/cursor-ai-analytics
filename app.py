@@ -745,9 +745,24 @@ if is_admin_route:
         st.subheader("Current Data")
         current_file = get_current_file_info()
         if current_file:
-            st.write(f"Last upload: {current_file['upload_date']}")
-            st.write(f"Size: {current_file['size_mb']} MB")
-            st.write(f"Records: {current_file['record_count']}")
+            # Convert timestamp to 12-hour format
+            from datetime import datetime
+            upload_time = datetime.fromisoformat(current_file['upload_date'])
+            formatted_time = upload_time.strftime("%Y-%m-%d %I:%M %p").lower().replace('am', 'AM').replace('pm', 'PM')
+            st.write(f"📅 Last upload: {formatted_time}")
+            st.write(f"📊 Size: {current_file['size_mb']} MB")
+            st.write(f"📈 Records: {current_file['record_count']}")
+            
+            # Show data source information
+            data_source = current_file.get('data_source', 'unknown')
+            if data_source == 'api_fetch':
+                st.write("🔄 **Data Source:** API Fetch (Cursor API)")
+            elif data_source == 'file_upload':
+                source_filename = current_file.get('source_filename', 'Unknown file')
+                st.write(f"📁 **Data Source:** File Upload")
+                st.write(f"📋 **Original File:** {source_filename}")
+            else:
+                st.write(f"❓ **Data Source:** {data_source}")
             
             if st.button("Delete Current Data", key="delete_data_btn"):
                 if delete_current_file():
@@ -756,41 +771,80 @@ if is_admin_route:
         else:
             st.info("No data currently uploaded")
         
-        st.subheader("Upload New Data")
-        uploaded_file = st.file_uploader("Upload new Cursor AI metrics CSV file", type=["csv"])
+        st.subheader("Data Management")
         
-        # Reset upload state if a different file is uploaded
-        if uploaded_file is not None and uploaded_file != st.session_state.last_uploaded_file:
-            st.session_state.upload_success = False
-            st.session_state.last_uploaded_file = uploaded_file
+        # Create tabs for different data input methods
+        tab1, tab2 = st.tabs(["API Fetch", "📁 File Upload"])
         
-        if uploaded_file is not None and not st.session_state.upload_success:
-            try:
-                df = pd.read_csv(uploaded_file)
-                # Validate data
-                errors = validate_dataframe(df)
-                if errors:
-                    st.error("❌ Invalid file format:")
-                    for error in errors:
-                        st.error(f"• {error}")
-                    st.info("Please upload a valid CSV file with the correct format.")
-                else:
-                    with st.spinner("Processing file, please wait..."):
-                        if save_data_to_db(df):
-                            st.session_state.upload_success = True
-                            st.success("✅ Data uploaded successfully!")
+        with tab1:
+            st.write("Fetch latest data from Cursor API ( from May 1, 2025 to today)")
+            
+            if st.button("🔄 Fetch Data from API", key="fetch_api_btn"):
+                try:
+                    # Import the API function
+                    from cursor_api import fetch_and_save_cursor_data
+                    
+                    with st.spinner("Fetching data from Cursor API, please wait..."):
+                        success = fetch_and_save_cursor_data()
+                        if success:
+                            st.success("✅ Data fetched and saved successfully!")
                             st.rerun()
                         else:
-                            st.error("❌ Failed to upload data")
-            except pd.errors.EmptyDataError:
-                st.error("❌ The uploaded file is empty.")
-                st.info("Please upload a CSV file containing data.")
-            except pd.errors.ParserError:
-                st.error("❌ Could not parse the file.")
-                st.info("Please make sure you're uploading a valid CSV file.")
-            except Exception as e:
-                st.error(f"❌ Error processing file: {str(e)}")
-                st.info("Please try uploading the file again or contact support if the issue persists.")
+                            st.error("❌ Failed to fetch data from API")
+                except ImportError:
+                    st.error("❌ API module not found. Please check cursor_api.py file.")
+                except Exception as e:
+                    if "CURSOR_API_KEY" in str(e):
+                        st.error("❌ API key not configured. Please add CURSOR_API_KEY to your .env file.")
+                    else:
+                        st.error(f"❌ Error fetching API data: {str(e)}")
+            
+            # Show API configuration status
+            try:
+                api_key = os.getenv('CURSOR_API_KEY')
+                if api_key:
+                    st.success(" Fetch data from configured API key")
+                else:
+                    st.warning("⚠️ API key not found. Please add CURSOR_API_KEY to your .env file.")
+            except:
+                pass
+        
+        with tab2:
+            st.write("Upload CSV file manually (legacy method)")
+            uploaded_file = st.file_uploader("Upload new Cursor AI metrics CSV file", type=["csv"])
+            
+            # Reset upload state if a different file is uploaded
+            if uploaded_file is not None and uploaded_file != st.session_state.last_uploaded_file:
+                st.session_state.upload_success = False
+                st.session_state.last_uploaded_file = uploaded_file
+            
+            if uploaded_file is not None and not st.session_state.upload_success:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                    # Validate data
+                    errors = validate_dataframe(df)
+                    if errors:
+                        st.error("❌ Invalid file format:")
+                        for error in errors:
+                            st.error(f"• {error}")
+                        st.info("Please upload a valid CSV file with the correct format.")
+                    else:
+                        with st.spinner("Processing file, please wait..."):
+                            if save_data_to_db(df, data_source="file_upload", source_filename=uploaded_file.name):
+                                st.session_state.upload_success = True
+                                st.success("✅ Data uploaded successfully!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to upload data")
+                except pd.errors.EmptyDataError:
+                    st.error("❌ The uploaded file is empty.")
+                    st.info("Please upload a CSV file containing data.")
+                except pd.errors.ParserError:
+                    st.error("❌ Could not parse the file.")
+                    st.info("Please make sure you're uploading a valid CSV file.")
+                except Exception as e:
+                    st.error(f"❌ Error processing file: {str(e)}")
+                    st.info("Please try uploading the file again or contact support if the issue persists.")
             
         if st.button("Logout", key="admin_logout_btn"):
             # Clear the session token

@@ -38,10 +38,6 @@ The application uses SQLite for all data storage. The database file `cursor_metr
    streamlit run app.py
    ```
 
-2. Access the admin panel:
-   ```bash
-   streamlit run admin_app.py
-   ```
 
 ## Data Format
 

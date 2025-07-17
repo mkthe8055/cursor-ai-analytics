@@ -35,8 +35,20 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         upload_date TEXT NOT NULL,
         size_mb REAL NOT NULL,
-        record_count INTEGER NOT NULL
+        record_count INTEGER NOT NULL,
+        data_source TEXT DEFAULT 'file_upload',
+        source_filename TEXT DEFAULT NULL
     )''')
+    
+    # Add new columns to existing metadata table if they don't exist
+    try:
+        db.execute('ALTER TABLE metadata ADD COLUMN data_source TEXT DEFAULT "file_upload"')
+    except:
+        pass  # Column already exists
+    try:
+        db.execute('ALTER TABLE metadata ADD COLUMN source_filename TEXT DEFAULT NULL')
+    except:
+        pass  # Column already exists
 
     # Manager data table
     db.execute('''CREATE TABLE IF NOT EXISTS manager_data (
@@ -67,7 +79,7 @@ def get_manager_info(email):
         print(f"Error getting manager info: {str(e)}")
         return {'Manager': '', 'Director': '', 'Department': ''}
 
-def save_data_to_db(df):
+def save_data_to_db(df, data_source="file_upload", source_filename=None):
     """Save DataFrame to SQLite database"""
     try:
         # Convert DataFrame to records
@@ -137,12 +149,14 @@ def save_data_to_db(df):
         # Update metadata
         file_size_mb = len(str(records)) / (1024 * 1024)  # Approximate size in MB
         db.execute('''
-            INSERT INTO metadata (upload_date, size_mb, record_count)
-            VALUES (?, ?, ?)
+            INSERT INTO metadata (upload_date, size_mb, record_count, data_source, source_filename)
+            VALUES (?, ?, ?, ?, ?)
         ''', (
             datetime.now().isoformat(),
             round(file_size_mb, 2),
-            len(records)
+            len(records),
+            data_source,
+            source_filename
         ))
         
         db.commit()

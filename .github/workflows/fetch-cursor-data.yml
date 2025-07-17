@@ -1,0 +1,73 @@
+name: Fetch Cursor Data Daily
+
+on:
+  schedule:
+    # Run daily at 8 PM IST (2:30 PM UTC)
+    - cron: '30 14 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+  CURSOR_API_URL: https://api.cursor.com/teams/daily-usage-data
+  CURSOR_START_DATE_EPOCH: 1746057600
+
+jobs:
+  fetch-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Fetch and save data
+      run: |
+        python cursor_api.py
+      env:
+        CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        CURSOR_API_URL: ${{ env.CURSOR_API_URL }}
+        CURSOR_START_DATE_EPOCH: ${{ env.CURSOR_START_DATE_EPOCH }}
+        
+    - name: Check for database changes
+      id: changes
+      run: |
+        if git diff --quiet cursor_metrics.db; then
+          echo "No changes detected"
+          echo "changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "Database changes detected"
+          echo "changed=true" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Commit and push changes
+      if: steps.changes.outputs.changed == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add cursor_metrics.db
+        git commit -m "Automated data update - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Trigger Streamlit deployment
+      if: steps.changes.outputs.changed == 'true'
+      run: |
+        echo "Database updated, Streamlit Cloud will automatically redeploy"
+        
+    - name: Summary
+      run: |
+        if [ "${{ steps.changes.outputs.changed }}" == "true" ]; then
+          echo "✅ Data fetched and database updated successfully"
+        else
+          echo "ℹ️ No new data to update"
+        fi 
